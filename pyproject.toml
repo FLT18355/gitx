@@ -1,0 +1,15 @@
+[project]
+name = "gitx"
+version = "0.2.0"
+description = "给中国人用的 GitHub 加速下载与同步工具"
+readme = "README.md"
+authors = [
+{ name = "FLT18355", email = "cm18750724707a@outlook.com" }
+]
+requires-python = ">=3.14"
+dependencies = []
+[project.scripts]
+gitx = "gitx:main"
+[build-system]
+requires = ["uv_build>=0.12.20,<0.13.0"]
+build-backend = "uv_build"

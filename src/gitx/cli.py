@@ -233,10 +233,17 @@ def _proxy_test() -> None:
     if not prefix:
         console.info("当前为直连模式, 跳过测试 (gitx proxy on 开启加速)")
         return
+    # git 克隆端点: 用 git ls-remote 真实探测
+    rc, _ = gitcmd.capture(
+        ["git", "ls-remote", "--symref", f"{prefix}/https://github.com/octocat/Hello-World.git", "HEAD"]
+    )
+    if rc == 0:
+        console.done("git 克隆端点: 可达")
+    else:
+        console.warn("git 克隆端点: 失败 (git ls-remote)")
     for label, path in (
-        ("github", prefix + "/https://github.com/"),
-        ("raw", prefix + "/https://raw.githubusercontent.com/"),
-        ("api", prefix + "/https://api.github.com/"),
+        ("raw", prefix + "/https://raw.githubusercontent.com/octocat/Hello-World/master/README"),
+        ("api", prefix + "/https://api.github.com/repos/octocat/Hello-World"),
     ):
         try:
             with urllib.request.urlopen(path, timeout=10) as r:

@@ -59,7 +59,7 @@ def push(argv: list[str]) -> None:
             console.error(str(exc))
         direct = github.repo_clone_url(info["owner"], info["repo"])
         fetch = accel.wrap(direct, prefix)
-        changed = gitcmd.ensure_remote("origin", fetch, push_url=direct, path=path)
+        changed = gitcmd.ensure_remote("origin", fetch, push_url=gitcmd.github_push_url(direct), path=path)
         console.info(f"远程: {info['owner']}/{info['repo']}"
                      + (" [拉取加速]" if prefix else "")
                      + (" (已更新)" if changed else ""))

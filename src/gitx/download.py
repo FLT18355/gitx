@@ -51,9 +51,10 @@ def _download_repo(info: dict, dest: str, prefix: str | None, depth: int, branch
     if _git_clone(clone_url, dest, depth, branch) != 0:
         console.error("克隆失败, 请检查网络或加速源 (gitx proxy test)")
     if prefix:
-        # 镜像不支持推送: 推送地址强制直连
+        # 镜像不支持推送: 推送地址走 SSH(有全局加速规则时)或直连 https
+        push_url = gitcmd.github_push_url(direct_url)
         subprocess.run(
-            ["git", "-C", dest, "remote", "set-url", "--push", "origin", direct_url],
+            ["git", "-C", dest, "remote", "set-url", "--push", "origin", push_url],
             check=False,
             capture_output=True,
         )

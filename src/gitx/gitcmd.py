@@ -104,6 +104,22 @@ def _github_rewrite_prefix() -> str:
     return ""
 
 
+def github_push_url(url: str) -> str:
+    """给定 GitHub 地址, 返回推送地址.
+
+    存在全局加速规则时返回 SSH 地址: 规则会把 https 推送也重写到
+    不支持推送的镜像(405), 而 SSH 不受影响(gh 已配置密钥).
+    无规则时返回直连 https.
+    """
+    m = re.search(r"https://github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$", url)
+    if not m:
+        return url
+    owner, repo = m.group(1), m.group(2)
+    if _github_rewrite_prefix():
+        return f"git@github.com:{owner}/{repo}.git"
+    return f"https://github.com/{owner}/{repo}.git"
+
+
 def _push_override(path: str, remote: str) -> str | None:
     """全局加速规则会把推送也重写到镜像(镜像不支持推送, 405).
 

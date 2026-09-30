@@ -8,13 +8,37 @@ from typing import Sequence
 
 from . import accel, console
 
+# 中文用户常踩的坑: 默认 core.quotepath=true 会把中文文件名显示成 \344\270\255 转义码
+ZH_CONFIG: dict[str, str] = {
+    "core.quotepath": "false",
+    "i18n.commitEncoding": "utf-8",
+    "i18n.logOutputEncoding": "utf-8",
+    "gui.encoding": "utf-8",
+}
+
+
+def apply_zh_config(scope: str = "--local", path: str = ".") -> list[str]:
+    """写入中文友好配置, 返回本次实际改动的键名."""
+    changed: list[str] = []
+    for key, value in ZH_CONFIG.items():
+        rc, cur = capture(["git", "-C", path, "config", scope, "--get", key])
+        if rc == 0 and cur == value:
+            continue
+        subprocess.run(["git", "-C", path, "config", scope, key, value],
+                       check=False, capture_output=True)
+        changed.append(key)
+    return changed
+
 
 def run(args: Sequence[str]) -> subprocess.CompletedProcess:
     return subprocess.run([str(a) for a in args])
 
 
 def capture(args: Sequence[str]) -> tuple[int, str]:
-    r = subprocess.run([str(a) for a in args], capture_output=True, text=True)
+    try:
+        r = subprocess.run([str(a) for a in args], capture_output=True, text=True)
+    except FileNotFoundError:
+        return 127, ""
     return r.returncode, (r.stdout or "").strip()
 
 
@@ -74,6 +98,99 @@ def default_branch(url: str) -> str:
             ref = line[len("ref:"):].strip().split("\t")[0].strip()
             return ref.split("/")[-1]
     return ""
+
+
+def commit_count(path: str = ".") -> int:
+    rc, out = capture(["git", "-C", path, "rev-list", "--count", "HEAD"])
+    try:
+        return int(out) if rc == 0 else 0
+    except ValueError:
+        return 0
+
+
+def resolve_sha(ref: str = "HEAD", path: str = ".") -> str:
+    rc, out = capture(["git", "-C", path, "rev-parse", ref])
+    return out if rc == 0 else ""
+
+
+def commit_brief(ref: str = "HEAD", path: str = ".") -> str:
+    """形如 '短哈希|相对时间|作者|说明'."""
+    rc, out = capture(["git", "-C", path, "log", "-1", "--pretty=format:%h|%ar|%an|%s", ref])
+    return out if rc == 0 else ""
+
+
+def status_counts(path: str = ".") -> tuple[int, int, int, int]:
+    """返回 (已暂存, 已修改, 未跟踪, 冲突)."""
+    rc, out = capture(["git", "-C", path, "status", "--porcelain"])
+    if rc != 0:
+        return 0, 0, 0, 0
+    staged = modified = untracked = conflicts = 0
+    for line in out.splitlines():
+        if len(line) < 2:
+            continue
+        x, y = line[0], line[1]
+        if "?" in (x, y):
+            untracked += 1
+            continue
+        if "U" in (x, y) or (x, y) in (("A", "A"), ("D", "D")):
+            conflicts += 1
+            continue
+        if x not in (" ", "!"):
+            staged += 1
+        if y not in (" ", "!"):
+            modified += 1
+    return staged, modified, untracked, conflicts
+
+
+def fetch(path: str = ".", remote: str = "origin") -> bool:
+    """更新远端跟踪引用 (用于判断领先/落后)."""
+    return subprocess.run(["git", "-C", path, "fetch", "--quiet", remote],
+                          capture_output=True).returncode == 0
+
+
+def has_upstream(path: str = ".") -> bool:
+    return capture(["git", "-C", path, "rev-parse", "--abbrev-ref", "@{upstream}"])[0] == 0
+
+
+def remote_branch_exists(remote: str, branch: str, path: str = ".") -> bool:
+    rc, out = capture(["git", "-C", path, "ls-remote", "--heads", remote, branch])
+    return rc == 0 and bool(out)
+
+
+def set_upstream(remote: str, branch: str, path: str = ".") -> bool:
+    return subprocess.run(
+        ["git", "-C", path, "branch", f"--set-upstream-to={remote}/{branch}", branch],
+        capture_output=True,
+    ).returncode == 0
+
+
+def behind_ahead(path: str = ".") -> tuple[int, int]:
+    """相对上游的 (落后, 领先); 无上游返回 (-1, -1)."""
+    rc, out = capture(["git", "-C", path, "rev-list", "--left-right", "--count", "@{upstream}...HEAD"])
+    if rc != 0:
+        return -1, -1
+    parts = out.replace("\t", " ").split()
+    if len(parts) != 2:
+        return -1, -1
+    try:
+        return int(parts[0]), int(parts[1])
+    except ValueError:
+        return -1, -1
+
+
+def reset(path: str, mode: str, target: str) -> bool:
+    return subprocess.run(["git", "-C", path, "reset", f"--{mode}", target]).returncode == 0
+
+
+def delete_head(path: str = ".") -> bool:
+    """删除 HEAD 引用: 撤销仓库的首个(也是唯一)提交, 保留暂存区内容."""
+    return subprocess.run(["git", "-C", path, "update-ref", "-d", "HEAD"]).returncode == 0
+
+
+def unstage_all(path: str = ".") -> bool:
+    """清空索引(文件保留在工作区, 变为未跟踪)."""
+    return subprocess.run(["git", "-C", path, "rm", "-r", "--cached", "-q", "."],
+                          capture_output=True).returncode == 0
 
 
 def commit_all(message: str, path: str = ".") -> bool:

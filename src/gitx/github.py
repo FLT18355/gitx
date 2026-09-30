@@ -8,20 +8,42 @@ _REPO_RE = re.compile(r"^https?://github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$")
 _TREE_RE = re.compile(r"^https?://github\.com/([^/]+)/([^/]+?)/tree/([^/]+)(?:/(.*))?/?$")
 _BLOB_RE = re.compile(r"^https?://github\.com/([^/]+)/([^/]+?)/(?:blob|raw)/([^/]+)/(.*?)/?$")
 _SSH_RE = re.compile(r"^git@github\.com:([^/]+)/([^/]+?)(?:\.git)?/?$")
+_ASSET_RE = re.compile(r"^https?://github\.com/([^/]+)/([^/]+?)/releases/download/([^/]+)/(.+?)/?$")
+_RELEASE_RE = re.compile(
+    r"^https?://github\.com/([^/]+)/([^/]+?)/releases(?:/(?:tag|latest|expanded_assets)/([^/]+))?/?$"
+)
 
 
 def parse_url(url: str) -> dict:
-    """解析 GitHub 链接 -> {mode, owner, repo, branch, path}.
+    """解析 GitHub 链接 -> {mode, owner, repo, branch, path[, tag]}.
 
-    mode: repo | folder | file
-    仓库:   https://github.com/owner/repo
-    文件夹: https://github.com/owner/repo/tree/分支/路径
-    文件:   https://github.com/owner/repo/blob|raw/分支/路径/文件
+    mode: repo | folder | file | release | asset
+    仓库:     https://github.com/owner/repo
+    文件夹:   https://github.com/owner/repo/tree/分支/路径
+    文件:     https://github.com/owner/repo/blob|raw/分支/路径/文件
+    发布页:   https://github.com/owner/repo/releases[/tag/标签]
+    发布附件: https://github.com/owner/repo/releases/download/标签/文件名
     """
     url = url.strip().rstrip("/").split("?")[0]
     m = _SSH_RE.match(url)
     if m:
         return {"mode": "repo", "owner": m.group(1), "repo": m.group(2), "branch": "", "path": ""}
+    m = _ASSET_RE.match(url)
+    if m:
+        return {
+            "mode": "asset",
+            "owner": m.group(1),
+            "repo": m.group(2),
+            "branch": "",
+            "path": m.group(4).rstrip("/"),
+            "tag": m.group(3),
+        }
+    m = _RELEASE_RE.match(url)
+    if m:
+        tag = m.group(3) or ""
+        if tag == "latest":
+            tag = ""
+        return {"mode": "release", "owner": m.group(1), "repo": m.group(2), "branch": "", "path": "", "tag": tag}
     m = _TREE_RE.match(url)
     if m:
         owner, repo, branch, path = m.group(1), m.group(2), m.group(3), (m.group(4) or "").strip("/")
@@ -50,3 +72,12 @@ def repo_clone_url(owner: str, repo: str) -> str:
 
 def raw_url(owner: str, repo: str, branch: str, path: str) -> str:
     return f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}"
+
+
+def api_url(owner: str, repo: str, path: str) -> str:
+    """GitHub REST API 地址; path 以 / 开头, 如 /releases/latest."""
+    return f"https://api.github.com/repos/{owner}/{repo}{path}"
+
+
+def github_url(owner: str, repo: str, path: str) -> str:
+    return f"https://github.com/{owner}/{repo}{path}"

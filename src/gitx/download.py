@@ -9,9 +9,9 @@ import tempfile
 import urllib.error
 import urllib.request
 
-from . import accel, console, gitcmd, github
+from . import __version__, accel, console, gitcmd, github
 
-_UA = {"User-Agent": "gitx/0.2"}
+_UA = {"User-Agent": f"gitx/{__version__}"}
 
 
 def download(url: str, dest: str, prefix: str | None, depth: int = 1, branch: str = "") -> None:

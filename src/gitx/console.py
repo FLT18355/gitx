@@ -34,6 +34,16 @@ def done(msg: str) -> None:
     print(f"{GREEN}[ok]{NC} {msg}")
 
 
+def human_size(n: float) -> str:
+    """字节数 -> 人类可读大小."""
+    units = ("B", "KB", "MB", "GB", "TB")
+    i = 0
+    while n >= 1024 and i < len(units) - 1:
+        n /= 1024
+        i += 1
+    return f"{n:.0f} {units[i]}" if i == 0 else f"{n:.1f} {units[i]}"
+
+
 def ask(question: str, default: bool | None = None) -> bool:
     """询问 y/n; 非交互环境使用 default(没有 default 视为 False)."""
     if default is True:

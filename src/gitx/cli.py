@@ -9,41 +9,54 @@ import subprocess
 import sys
 import urllib.request
 
-from . import __version__, accel, config, console, download, gitcmd, github, sync
+from . import __version__, accel, config, console, download, gitcmd, github, release, repo, sync
 
-USAGE = f"""{'=' * 56}
+USAGE = f"""{'=' * 58}
 {console.CYAN}gitx{console.NC} —— 给中国人用的 GitHub 加速与同步工具 v{__version__}
-{'=' * 56}
+{'=' * 58}
 
 {console.GREEN}下载 (默认走加速, 加速源: v6.gh-proxy.org){console.NC}
   gitx <github-url> [目标路径] [选项]
-    仓库:   https://github.com/owner/repo
-    文件夹: https://github.com/owner/repo/tree/分支/路径
-    文件:   https://github.com/owner/repo/blob/分支/路径/文件
+    仓库:     https://github.com/owner/repo
+    文件夹:   https://github.com/owner/repo/tree/分支/路径
+    文件:     https://github.com/owner/repo/blob/分支/路径/文件
+    发布页:   https://github.com/owner/repo/releases[/tag/标签]
+    发布附件: https://github.com/owner/repo/releases/download/标签/文件名
   gitx clone <github-url> [目标路径] [选项]
+  gitx release <owner/repo|发布页链接> [--tag 标签] [--asset 名字] [--list] [--source] [-o 目录]
 
 {console.GREEN}同步{console.NC}
   gitx push [备注] [to <仓库地址>] [-f] [-m 信息] [-b 分支] [-C 路径]
   gitx pull [路径] [--rebase]
+  gitx sync [备注] [--merge] [-f] [-C 路径]        先拉后推, 一步到位 (默认变基)
+
+{console.GREEN}仓库{console.NC}
+  gitx init [目录] [git init 参数] [--no-zh]       初始化: 分支 main + 中文友好配置
+  gitx info [路径]                                 仓库概览 (状态/领先落后/最近提交/加速)
+  gitx undo [次数] [--soft|--mixed|--hard] [-y]    撤销最近 N 次提交
 
 {console.GREEN}加速管理 (拉取走加速, 推送直连){console.NC}
-  gitx proxy              查看加速状态
-  gitx proxy on [加速源]  开启加速 (默认 v6)
-  gitx proxy off          关闭加速 (直连)
-  gitx proxy default      恢复默认加速源 v6
-  gitx proxy set <url>    使用自定义加速源 (如 https://gh-proxy.com)
+  gitx proxy               查看加速状态
+  gitx proxy auto          自动测速, 选用最快的加速源
+  gitx proxy on [加速源]   开启加速 (默认 v6)
+  gitx proxy off           关闭加速 (直连)
+  gitx proxy default       恢复默认加速源 v6
+  gitx proxy set <url>     使用自定义加速源 (如 https://gh-proxy.com)
+  gitx proxy http [地址|off]  设置 git 的 HTTP(S) 代理 (本地代理/公司网络)
   gitx proxy install [--local]  写 git insteadOf 规则, 普通 git 命令也走加速
-  gitx proxy uninstall    移除 insteadOf 规则
-  gitx proxy test         测试当前加速源连通性
+  gitx proxy uninstall     移除 insteadOf 规则
+  gitx proxy test          测试当前加速源连通性
 
 {console.GREEN}配置{console.NC}
-  gitx config              查看配置
-  gitx config set <键> <值>  键: proxy / depth / branch / message
-  gitx config reset        恢复默认
-  gitx doctor              环境自检 (git/gh/仓库/加速源)
+  gitx config                查看配置
+  gitx config set <键> <值>    键: proxy / depth / branch / message
+  gitx config zh [--global]  一键中文友好配置 (文件名不转义, 日志 UTF-8)
+  gitx config reset          恢复默认
+  gitx doctor                环境自检 (git/gh/仓库/加速源/编码)
 
 {console.GREEN}其它 git 子命令直接透传{console.NC}
-  gitx status / gitx log --oneline / gitx diff / gitx commit -m ... / gitx init
+  gitx status / gitx log --oneline / gitx diff / gitx commit -m ...
+  (原生 git init 用: gitx git init)
 
 {console.GREEN}常用选项{console.NC}
   --proxy <加速源>   本次使用指定加速源 (v6 / gh-proxy / https://...)
@@ -82,6 +95,21 @@ def main(argv: list[str] | None = None) -> None:
     if first == "clone":
         cmd_download(argv[1:])
         return
+    if first == "release":
+        release.cmd(argv[1:])
+        return
+    if first == "init":
+        repo.init_cmd(argv[1:])
+        return
+    if first == "info":
+        repo.info_cmd(argv[1:])
+        return
+    if first == "undo":
+        repo.undo_cmd(argv[1:])
+        return
+    if first == "sync":
+        sync.sync(argv[1:])
+        return
     if first == "push":
         sync.push(argv[1:])
         return
@@ -101,6 +129,9 @@ def cmd_download(argv: list[str]) -> None:
     proxy_flag = None
     depth = None
     branch = ""
+    list_only = False
+    source = False
+    asset = ""
     rest: list[str] = []
     i = 0
     while i < len(argv):
@@ -119,8 +150,17 @@ def cmd_download(argv: list[str]) -> None:
         elif a in ("-b", "--branch") and i + 1 < len(argv):
             i += 1
             branch = argv[i]
+        elif a == "--list":
+            list_only = True
+        elif a == "--source":
+            source = True
+        elif a in ("-a", "--asset") and i + 1 < len(argv):
+            i += 1
+            asset = argv[i]
         elif a in ("-h", "--help"):
-            console.info("用法: gitx <github-url> [目标路径] [--proxy 加速源] [--no-proxy] [--branch 分支] [--depth N]")
+            console.info("用法: gitx <github-url> [目标路径] [--proxy 加速源] [--no-proxy] "
+                         "[--branch 分支] [--depth N]\n"
+                         "  发布页链接另支持: --list / --asset <名字> / --source")
             return
         else:
             rest.append(a)
@@ -134,10 +174,14 @@ def cmd_download(argv: list[str]) -> None:
         info = github.parse_url(url)
     except ValueError as exc:
         console.error(f"{exc}\n提示: 其它 git 子命令可直接透传, 如 gitx status")
+    prefix = config.active_proxy(proxy_flag, no_proxy)
+    if info["mode"] in ("release", "asset"):
+        release.run(info, dest or ".", prefix,
+                    list_only=list_only, asset=asset, source=source)
+        return
     item_name = os.path.basename(info["path"]) if info["path"] else info["repo"]
     target = dest or item_name
     _clear_dest(target)
-    prefix = config.active_proxy(proxy_flag, no_proxy)
     if depth is None:
         depth = int(config.load().get("depth", 1))
     download.download(url, target, prefix, depth, branch)
@@ -221,7 +265,61 @@ def cmd_proxy(argv: list[str]) -> None:
     if sub == "test":
         _proxy_test()
         return
-    console.error(f"未知子命令: {sub} (可用: on / off / default / set / install / uninstall / test / status)")
+    if sub == "auto":
+        _proxy_auto()
+        return
+    if sub == "http":
+        _proxy_http(argv[1:])
+        return
+    console.error(f"未知子命令: {sub} (可用: on / off / default / set / auto / http / install / uninstall / test / status)")
+
+
+def _proxy_auto() -> None:
+    """逐个测速并选用最快的加速源 (含直连)."""
+    cfg = config.load()
+    console.step("正在测速 (git 克隆端点, 越小越快)...")
+    results: list[tuple[str, float]] = []
+    for name, prefix in list(accel.PROVIDERS.items()) + [("off", None)]:
+        ms, ok = accel.probe(prefix)
+        label = f"{name} ({prefix})" if prefix else "直连 (off)"
+        if ok:
+            console.info(f"  {label:<44} {ms:7.0f} ms")
+            results.append((name, ms))
+        else:
+            console.warn(f"  {label:<44} 不可达")
+    if not results:
+        console.error("所有加速源都不可达, 请检查网络 (gitx proxy test)")
+    best = min(results, key=lambda item: item[1])[0]
+    config.save({**cfg, "proxy": best})
+    console.done(f"已选择最快: {best}" + (f" ({accel.PROVIDERS[best]})" if best in accel.PROVIDERS else " 直连"))
+
+
+def _proxy_http(argv: list[str]) -> None:
+    """设置/查看 git 的 HTTP(S) 代理 (本地代理软件或公司网络)."""
+    scope = "--local" if "--local" in argv else "--global"
+    args = [a for a in argv if not a.startswith("--local")]
+    if not args or argv[0] in ("-h", "--help"):
+        cur_http = gitcmd.capture(["git", "config", scope, "--get", "http.proxy"])[1]
+        cur_https = gitcmd.capture(["git", "config", scope, "--get", "https.proxy"])[1]
+        if cur_http or cur_https:
+            console.info(f"git {scope} 代理: http.proxy={cur_http or '(未设置)'} | https.proxy={cur_https or '(未设置)'}")
+        else:
+            console.info(f"git {scope} 代理: 未设置")
+        console.info("用法: gitx proxy http <地址>    如 gitx proxy http http://127.0.0.1:7890")
+        console.info("      gitx proxy http off       取消代理")
+        console.info("      gitx proxy http [--local] 查看当前仓库的代理")
+        return
+    addr = args[0]
+    if addr in ("off", "none", "取消"):
+        for key in ("http.proxy", "https.proxy"):
+            subprocess.run(["git", "config", scope, "--unset-all", key], check=False, capture_output=True)
+        console.done(f"已取消 git {scope} HTTP(S) 代理")
+        return
+    if not addr.startswith(("http://", "https://", "socks5://", "socks5h://")):
+        console.error(f"代理地址应以 http:// 或 socks5:// 开头: {addr}")
+    for key in ("http.proxy", "https.proxy"):
+        subprocess.run(["git", "config", scope, key, addr], check=True)
+    console.done(f"已设置 git {scope} 代理: {addr}")
 
 
 def _proxy_test() -> None:
@@ -291,7 +389,14 @@ def cmd_config(argv: list[str]) -> None:
         config.save(dict(config.DEFAULTS))
         console.done("配置已重置为默认")
         return
-    console.error(f"未知子命令: {sub} (可用: list / get / set / reset)")
+    if sub == "zh":
+        scope = "--global" if "--global" in argv else "--local"
+        if scope == "--local" and not gitcmd.is_repo("."):
+            console.error("当前目录不是 git 仓库\n  全局设置请用: gitx config zh --global")
+        changed = gitcmd.apply_zh_config(scope, ".")
+        console.done(f"已写入 {scope} 中文友好配置: " + (", ".join(changed) if changed else "已是最新"))
+        return
+    console.error(f"未知子命令: {sub} (可用: list / get / set / zh / reset)")
 
 
 # ---------------------------------------------------------------- doctor
@@ -313,6 +418,11 @@ def cmd_doctor(_argv: list[str] | None = None) -> None:
         console.info("仓库: 否")
     console.step("测试加速源...")
     _proxy_test()
+    quotepath = gitcmd.capture(["git", "config", "--global", "--get", "core.quotepath"])[1]
+    if quotepath in ("false", "0", "off"):
+        console.done("编码: core.quotepath=false (中文文件名正常显示)")
+    else:
+        console.warn("编码: 中文文件名会显示为 \\344\\270\\255 转义码, 建议: gitx config zh --global")
 
 
 # ---------------------------------------------------------------- passthrough

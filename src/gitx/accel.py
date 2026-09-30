@@ -68,6 +68,28 @@ def uninstall_rewrite(prefix: str, scope: str = "--global") -> None:
         )
 
 
+def probe(prefix: str | None, timeout: int = 20) -> tuple[float, bool]:
+    """探测加速源: 用 git ls-remote 实测克隆端点, 返回 (毫秒, 是否可达).
+
+    prefix=None 表示直连; 用真实 git 请求而不是 HTTP 状态码, 结果才可信.
+    """
+    import os
+    import subprocess
+    import time
+
+    url = wrap("https://github.com/octocat/Hello-World.git", prefix)
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+    start = time.perf_counter()
+    ok = False
+    try:
+        r = subprocess.run(["git", "ls-remote", "--symref", url, "HEAD"],
+                           capture_output=True, timeout=timeout, env=env)
+        ok = r.returncode == 0
+    except (subprocess.TimeoutExpired, OSError):
+        ok = False
+    return (time.perf_counter() - start) * 1000, ok
+
+
 def installed_prefix() -> str:
     """从 git 全局配置探测已安装的加速前缀; 无则返回空串."""
     rc, out = _git_config_get_regexp(scope="--global", pattern=r"url\..*insteadOf")

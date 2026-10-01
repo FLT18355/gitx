@@ -1,4 +1,4 @@
-"""push / pull / sync 流程."""
+"""push / pull / sync 流程 (命令行解析交给 cli.py 的 typer 层)."""
 
 from __future__ import annotations
 
@@ -69,105 +69,9 @@ def do_push(path: str = ".", message: str = "", force: bool = False,
     console.done("推送成功!")
 
 
-def push(argv: list[str]) -> None:
-    message = ""
-    force = False
-    to_url = ""
-    branch = ""
-    path = "."
-    no_proxy = False
-    free: list[str] = []
-
-    i = 0
-    while i < len(argv):
-        a = argv[i]
-        if a in ("-f", "--force"):
-            force = True
-        elif a in ("-m", "--message") and i + 1 < len(argv):
-            i += 1
-            message = argv[i]
-        elif a in ("-b", "--branch") and i + 1 < len(argv):
-            i += 1
-            branch = argv[i]
-        elif a in ("-C", "--path") and i + 1 < len(argv):
-            i += 1
-            path = argv[i]
-        elif a == "--no-proxy":
-            no_proxy = True
-        elif a == "to" and i + 1 < len(argv):
-            i += 1
-            to_url = argv[i]
-        elif a in ("-h", "--help"):
-            console.info("用法: gitx push [备注] [to <仓库地址>] [-f] [-m 信息] [-b 分支] [-C 路径] [--no-proxy]")
-            return
-        elif a.startswith("-"):
-            console.error(f"未知参数: {a}")
-        else:
-            free.append(a)
-        i += 1
-    if free:
-        message = message or " ".join(free)
-    do_push(path=path, message=message, force=force, no_proxy=no_proxy, to_url=to_url, branch=branch)
-
-
-def pull(argv: list[str]) -> None:
-    path = "."
-    rebase = False
-    no_proxy = False
-    for i, a in enumerate(argv):
-        if a in ("-C", "--path") and i + 1 < len(argv):
-            path = argv[i + 1]
-        elif a == "--rebase":
-            rebase = True
-        elif a == "--no-proxy":
-            no_proxy = True
-        elif a in ("-h", "--help"):
-            console.info("用法: gitx pull [路径] [--rebase] [--no-proxy]")
-            return
-        elif a.startswith("-"):
-            console.error(f"未知参数: {a}")
-        else:
-            path = a
-    do_pull(path, rebase, no_proxy)
-
-
-def sync(argv: list[str]) -> None:
+def do_sync(path: str = ".", message: str = "", force: bool = False,
+            no_proxy: bool = False, rebase: bool = True) -> None:
     """先拉取(默认变基)再推送, 一步完成日常同步."""
-    message = ""
-    force = False
-    path = "."
-    no_proxy = False
-    rebase = True
-    free: list[str] = []
-
-    i = 0
-    while i < len(argv):
-        a = argv[i]
-        if a in ("-f", "--force"):
-            force = True
-        elif a in ("-m", "--message") and i + 1 < len(argv):
-            i += 1
-            message = argv[i]
-        elif a in ("-C", "--path") and i + 1 < len(argv):
-            i += 1
-            path = argv[i]
-        elif a == "--no-proxy":
-            no_proxy = True
-        elif a == "--merge":
-            rebase = False
-        elif a == "--rebase":
-            rebase = True
-        elif a in ("-h", "--help"):
-            console.info("用法: gitx sync [备注] [--merge] [-f] [-C 路径] [--no-proxy]\n"
-                         "  默认: pull --rebase 后 push")
-            return
-        elif a.startswith("-"):
-            console.error(f"未知参数: {a}")
-        else:
-            free.append(a)
-        i += 1
-    if free:
-        message = message or " ".join(free)
     console.step("同步: 先拉取, 再推送")
     do_pull(path, rebase, no_proxy)
     do_push(path=path, message=message, force=force, no_proxy=no_proxy)

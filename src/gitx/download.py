@@ -76,9 +76,13 @@ def _download_folder(info: dict, dest: str, prefix: str | None, depth: int, bran
                      + (" [加速]" if prefix else ""))
         if subprocess.run(args).returncode != 0:
             console.error("克隆失败, 请检查网络或加速源 (gitx proxy test)")
-        subprocess.run(["git", "-C", tmp, "sparse-checkout", "init", "--no-cone"], check=True)
-        subprocess.run(["git", "-C", tmp, "sparse-checkout", "set", path_in_repo], check=True)
-        subprocess.run(["git", "-C", tmp, "checkout", branch], check=True)
+        for step_args, what in (
+            (["sparse-checkout", "init", "--no-cone"], "初始化稀疏检出"),
+            (["sparse-checkout", "set", path_in_repo], "设置稀疏检出路径"),
+            (["checkout", branch], "检出文件"),
+        ):
+            if subprocess.run(["git", "-C", tmp, *step_args], capture_output=True).returncode != 0:
+                console.error(f"{what}失败: {path_in_repo} (检查分支名与路径)")
         src = os.path.join(tmp, path_in_repo)
         if not os.path.lexists(src):
             console.error(f"路径不存在: {path_in_repo} (检查分支名与路径)")
@@ -105,12 +109,13 @@ def _fetch(url: str, dest: str) -> None:
     os.makedirs(parent, exist_ok=True)
     req = urllib.request.Request(url, headers=_UA)
     try:
-        with urllib.request.urlopen(req, timeout=60) as r, open(dest, "wb") as f:
-            shutil.copyfileobj(r, f)
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            console.save_stream(resp, dest, os.path.basename(dest))
     except urllib.error.HTTPError as exc:
         console.error(f"下载失败 HTTP {exc.code} ({url})\n提示: 检查分支名与路径是否正确")
     except (urllib.error.URLError, OSError) as exc:
         console.error(f"下载失败: {exc}\n提示: 可尝试 gitx proxy test / gitx proxy on 开启加速")
+    console.done(f"{os.path.basename(dest)} {console.human_size(os.path.getsize(dest))}")
 
 
 def _git_clone(url: str, dest: str, depth: int, branch: str) -> int:

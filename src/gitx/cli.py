@@ -2,41 +2,48 @@
 
 命令分组:
   下载 (download / clone / release)   同步 (push / pull / sync)
-  仓库 (init / info / undo)           加速 (proxy ...)   配置 (config ... / doctor)
-其它 git 子命令直接透传 (gitx status / gitx log --oneline)。
+  仓库 (init / info / undo / graph / branches / tidy / url)
+  探索 (search / web / ignore)        加速 (proxy ...)   配置 (config ... / doctor)
+非 gitx 自己的词一律透传 git (gitx status / gitx log --oneline), 这条快速通道
+由 dispatch.py 在导入 typer 之前处理, 因此几乎瞬时完成。
 """
 
 from __future__ import annotations
 
 import os
-import re
-import shutil
 import subprocess
 import sys
-import urllib.request
 from typing import Annotated, Optional
 
 import typer
 
-from . import __version__, accel, config, console, download, gitcmd, github, release, repo, sync
+from . import __version__, accel, config, console, download, gitcmd, github, hub, release, repo, sync
 
 PANEL_DL = "下载 (默认加速)"
 PANEL_SYNC = "同步"
 PANEL_REPO = "仓库"
+PANEL_HUB = "探索 (搜索 / 网页 / 模板)"
 PANEL_PROXY = "加速管理"
 PANEL_CONF = "配置与自检"
+
+_CFG_KEYS = "/".join(config.DEFAULTS)
 
 _HELP = f"""[key]gitx[/key] -- 给中国人用的 GitHub 加速与同步工具 [dim]v{__version__}[/dim]
 
 拉取 (克隆 / 文件 / Release 附件 / API) 默认走加速镜像 [num]{accel.PROVIDERS['v6']}[/num], 推送直连 GitHub。
 直接给一个 GitHub 链接即可下载: [key]gitx https://github.com/owner/repo[/key]
-其它 git 子命令会原样透传: [key]gitx status[/key] / [key]gitx log --oneline[/key]"""
+其它词一律透传 git, 且不加载 typer, 因此几乎瞬时: [key]gitx status[/key] / [key]gitx log --oneline[/key]"""
 
 _EPILOG = """[key]示例[/key]
   gitx https://github.com/owner/repo                下载仓库 -> ./repo
-  gitx https://github.com/owner/repo/tree/main/src  只下载某个文件夹
+  gitx https://github.com/owner/repo/tree/main/src  只下载某个文件夹 (部分克隆, 实测快 8 倍)
+  gitx https://github.com/owner/repo -x             下载并解压源码包 (不用 git, 只取一个流)
   gitx release cli/cli --list                       看最新发布的附件清单
   gitx release cli/cli --asset '*linux_amd64*'      只下匹配的附件
+  gitx search "cli 工具" --language go -d           搜仓库并下载第 1 个
+  gitx graph -n 30                                  带图形的提交历史
+  gitx tidy --gc                                    仓库体检 + 打包瘦身
+  gitx url accel                                    让 origin 拉取走加速
   gitx proxy auto                                   自动测速并选用最快加速源
 
 环境变量 [num]GITX_PROXY[/num] = off | v6 | gh-proxy | https://... 可设置全局默认加速源。"""
@@ -75,6 +82,11 @@ def download_cmd(
     dest: Annotated[Optional[str], typer.Argument(metavar="目标路径", help="保存位置, 默认用仓库名")] = None,
     branch: Annotated[str, typer.Option("--branch", "-b", help="指定分支")] = "",
     depth: Annotated[Optional[int], typer.Option("--depth", "-d", help="克隆深度, 0 = 完整克隆")] = None,
+    archive: Annotated[bool, typer.Option("--archive", "-x", "--tarball",
+                                          help="下载源码包 tar.gz, 不用 git (不要历史时最快)")] = False,
+    extract: Annotated[bool, typer.Option("--extract", "-X", help="下载源码包并直接解压 (隐含 -x)")] = False,
+    submodules: Annotated[bool, typer.Option("--submodules", help="连同子模组一起拉取 (同样走加速)")] = False,
+    fresh: Annotated[bool, typer.Option("--fresh", help="忽略 .part 断点, 从零下载")] = False,
     list_only: Annotated[bool, typer.Option("--list", "-l", help="仅列出附件 (发布页链接)")] = False,
     limit: Annotated[int, typer.Option("--limit", "-n", help="发布列表条数 (发布页链接挑选发布用, 最多 100)")] = release.DEFAULT_LIMIT,
     assets: Annotated[Optional[list[str]], typer.Option("--asset", "-a", help="仅下载匹配的附件, 可重复")] = None,
@@ -82,9 +94,14 @@ def download_cmd(
     proxy: Annotated[Optional[str], typer.Option("--proxy", help="本次使用的加速源: v6 / gh-proxy / https://...")] = None,
     no_proxy: Annotated[bool, typer.Option("--no-proxy", help="本次直连, 不走加速")] = False,
 ) -> None:
-    """下载仓库 / 文件夹 / 单个文件 / Release 附件, [info]默认走加速[/info]."""
+    """下载仓库 / 文件夹 / 单个文件 / 源码包 / Release 附件, [info]默认走加速[/info].
+
+    要历史用 [key]git clone[/key] 路线 (浅克隆), 只要文件树用 [key]-x[/key] 源码包路线,
+    只要某个目录用 [key]tree[/key] 链接 (部分克隆 + 稀疏检出), 单个文件用 [key]blob[/key] 链接。
+    """
     _do_download(url, dest, depth, branch, proxy, no_proxy,
-                 list_only=list_only, assets=assets, source=source, limit=limit)
+                 list_only=list_only, assets=assets, source=source, limit=limit,
+                 archive=archive or extract, extract=extract, submodules=submodules, fresh=fresh)
 
 
 app.command("clone", hidden=True, rich_help_panel=PANEL_DL,
@@ -102,6 +119,7 @@ def release_cmd(
     list_only: Annotated[bool, typer.Option("--list", "-l", help="只列出附件清单, 不下载")] = False,
     source: Annotated[bool, typer.Option("--source", help="额外下载源码包 (tarball)")] = False,
     output: Annotated[str, typer.Option("--output", "-o", help="保存目录")] = ".",
+    refresh: Annotated[bool, typer.Option("--fresh", help="忽略 .part 断点, 从零下载")] = False,
     proxy: Annotated[Optional[str], typer.Option("--proxy", help="本次使用的加速源: v6 / gh-proxy / https://...")] = None,
     no_proxy: Annotated[bool, typer.Option("--no-proxy", help="本次直连, 不走加速")] = False,
 ) -> None:
@@ -109,11 +127,13 @@ def release_cmd(
 
     终端里直接 [key]gitx release owner/repo[/key] 会先让你挑发布 (含预发布), 再挑要下载的附件;
     两处都直接回车 = 最新发布 + 全部附件。给了 [key]--tag[/key] / [key]--asset[/key] 就是非交互模式。
+    中断的下载会留下 [key]<文件>.part[/key], 重跑自动续传 ([key]--fresh[/key] 可忽略)。
     """
     info = release.parse_target(target)
     prefix = config.active_proxy(proxy, no_proxy)
     release.run(info, output, prefix, tag=tag, assets=tuple(assets or ()),
-                list_only=list_only, tags=tags, pick=pick, source=source, limit=limit)
+                list_only=list_only, tags=tags, pick=pick, source=source, limit=limit,
+                resume=not refresh)
 
 
 # ================================================================ 同步
@@ -199,6 +219,117 @@ def undo(
     """撤销最近 N 个提交 (默认 --soft, 提交仍在 reflog 中可恢复)."""
     mode = "hard" if hard else "mixed" if mixed else "soft"
     repo.undo(times, mode, path, yes)
+
+
+@app.command("graph", rich_help_panel=PANEL_REPO)
+def graph_cmd(
+    limit: Annotated[int, typer.Option("--limit", "-n", help="显示多少条提交")] = 15,
+    all_refs: Annotated[bool, typer.Option("--all", "-a", help="显示所有引用 (含其它分支/标签)")] = False,
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """带图形的提交历史 (git log --graph 的上色版)."""
+    repo.graph(limit, all_refs, path)
+
+
+app.command("lg", hidden=True, rich_help_panel=PANEL_REPO,
+            help="graph 的别名")(graph_cmd)
+
+
+@app.command(rich_help_panel=PANEL_REPO)
+def branches(
+    path: Annotated[str, typer.Argument(metavar="路径", help="仓库路径")] = ".",
+    include_remote: Annotated[bool, typer.Option("--all", "-a", help="含远端跟踪分支")] = False,
+    limit: Annotated[int, typer.Option("--limit", "-n", help="最多显示多少个分支")] = 20,
+) -> None:
+    """分支列表: 上游 / 领先落后 / 最近提交."""
+    repo.branches(path, include_remote=include_remote, limit=limit)
+
+
+@app.command(rich_help_panel=PANEL_REPO)
+def tidy(
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+    prune: Annotated[bool, typer.Option("--prune", help="删除已合并的本地分支 (会确认)")] = False,
+    gc_: Annotated[bool, typer.Option("--gc", help="运行 git gc 打包瘦身")] = False,
+    aggressive: Annotated[bool, typer.Option("--aggressive", help="--gc 时更彻底 (更慢)")] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="跳过确认")] = False,
+) -> None:
+    """仓库体检: 体积 / 已合并分支 / 打包瘦身."""
+    repo.tidy(path, prune=prune, run_gc=gc_, aggressive=aggressive, yes=yes)
+
+
+@app.command(rich_help_panel=PANEL_REPO)
+def url(
+    transport: Annotated[Optional[str], typer.Argument(
+        metavar="[accel|https|ssh]", help="切换 origin 地址形态, 缺省则查看")] = None,
+    remote: Annotated[str, typer.Option("--remote", "-r", help="远程名")] = "origin",
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """查看或切换远端地址: accel (拉取加速, 推送直连) / https / ssh."""
+    repo.url(path, transport or "", remote)
+
+
+# ================================================================ 探索
+
+@app.command(rich_help_panel=PANEL_HUB)
+def search(
+    keyword: Annotated[str, typer.Argument(metavar="关键词", help="搜索词, 如 'cli 工具'")],
+    limit: Annotated[int, typer.Option("--limit", "-n", help="显示多少个结果 (最多 50)")] = 10,
+    sort: Annotated[str, typer.Option("--sort", help="排序: stars / forks / updated")] = "stars",
+    language: Annotated[str, typer.Option("--language", "-L", help="限定语言, 如 python / go")] = "",
+    download: Annotated[bool, typer.Option("--download", "-d", help="直接下载选中的仓库")] = False,
+    dest: Annotated[Optional[str], typer.Option("--output", "-o", help="下载目标路径")] = None,
+    depth: Annotated[Optional[int], typer.Option("--depth", help="克隆深度, 0 = 完整克隆")] = None,
+    proxy: Annotated[Optional[str], typer.Option("--proxy", help="本次使用的加速源")] = None,
+    no_proxy: Annotated[bool, typer.Option("--no-proxy", help="本次直连, 不走加速")] = False,
+) -> None:
+    """搜索 GitHub 仓库 (走 API, 默认加速), [option]-d[/option] 可直接下载."""
+    if sort not in hub.SEARCH_SORTS:
+        console.error(f"不支持的排序: {sort} (可选: {', '.join(hub.SEARCH_SORTS)})")
+    prefix = config.active_proxy(proxy, no_proxy)
+    items = hub.search(keyword, prefix, limit=limit, sort=sort, language=language)
+    if not download or not items:
+        return
+    index = 0
+    if len(items) > 1 and console.is_terminal():
+        labels = [f"{repo.get('full_name')}  ★{repo.get('stargazers_count')}  "
+                  f"{repo.get('description') or ''}"[:90] for repo in items]
+        picked = console.select("要下载哪个?", labels, instruction="[↑↓] 选择  [输入] 筛选  [回车] 确认")
+        if picked is None:
+            console.warn("已取消下载")
+            return
+        index = picked
+    repo_full = str(items[index].get("full_name") or "")
+    _do_download(f"https://github.com/{repo_full}", dest, depth, "", proxy, no_proxy)
+
+
+@app.command(rich_help_panel=PANEL_HUB)
+def web(
+    what: Annotated[Optional[str], typer.Argument(
+        metavar="[页面]",
+        help="issues / pulls / releases / actions / wiki / branch / commit, 缺省为首页")] = None,
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+    no_open: Annotated[bool, typer.Option("--print", help="只打印地址, 不打开浏览器")] = False,
+) -> None:
+    """用浏览器打开当前仓库的 GitHub 页面 (issues / releases / commit ...)."""
+    hub.web(path, what or "", browse=not no_open)
+
+
+@app.command(rich_help_panel=PANEL_HUB)
+def ignore(
+    names: Annotated[Optional[list[str]], typer.Argument(
+        metavar="[模板...]", help="如 python node macos")] = None,
+    list_only: Annotated[bool, typer.Option("--list", "-l", help="列出可用模板")] = False,
+    force: Annotated[bool, typer.Option("--force", "-f", help="覆盖已有 .gitignore")] = False,
+    output: Annotated[str, typer.Option("--output", "-o", help="写入目录")] = ".",
+    proxy: Annotated[Optional[str], typer.Option("--proxy", help="本次使用的加速源")] = None,
+    no_proxy: Annotated[bool, typer.Option("--no-proxy", help="本次直连, 不走加速")] = False,
+) -> None:
+    """从 github/gitignore 拉取 .gitignore 模板并写入 (默认追加)."""
+    prefix = config.active_proxy(proxy, no_proxy)
+    if list_only:
+        hub.list_templates(" ".join(names or []), prefix)
+        return
+    hub.ignore(list(names or []), output, force=force, prefix=prefix)
 
 
 # ================================================================ 加速管理
@@ -347,6 +478,8 @@ def _proxy_test() -> None:
         console.info("当前为直连模式, 跳过测试 (gitx proxy on 开启加速)")
         return
     console.step(f"测试加速源: {name} ({prefix})")
+    import urllib.request  # noqa: PLC0415 仅网络命令需要, 避免拖慢其它命令
+
     table = console.table("端点", "结果", title="连通性")
     rc, _ = gitcmd.capture(
         ["git", "ls-remote", "--symref", f"{prefix}/https://github.com/octocat/Hello-World.git", "HEAD"]
@@ -430,14 +563,15 @@ def config_list() -> None:
 
 
 @config_app.command("get")
-def config_get(key: Annotated[str, typer.Argument(metavar="键", help="proxy / depth / branch / message")]) -> None:
+def config_get(key: Annotated[str, typer.Argument(metavar="键", help=_CFG_KEYS)]) -> None:
     """查看单个配置项."""
-    console.info(f"{key} = {config.load().get(key, '')}")
+    value = config.load().get(key, "")
+    console.info(f"{key} = {_mask(key, value)}")
 
 
 @config_app.command("set")
 def config_set(
-    key: Annotated[str, typer.Argument(metavar="键", help="proxy / depth / branch / message")],
+    key: Annotated[str, typer.Argument(metavar="键", help=_CFG_KEYS)],
     value: Annotated[str, typer.Argument(metavar="值")],
 ) -> None:
     """修改配置项."""
@@ -451,7 +585,7 @@ def config_set(
         except ValueError:
             console.error("depth 必须是整数")
     config.save({**config.load(), key: value})
-    console.done(f"{key} = {value}")
+    console.done(f"{key} = {_mask(key, value)}")
 
 
 @config_app.command("reset")
@@ -476,10 +610,18 @@ def config_zh(
 app.add_typer(config_app, name="config", rich_help_panel=PANEL_CONF)
 
 
+def _mask(key: str, value: object) -> str:
+    """token 之类敏感值只显示尾巴."""
+    text = str(value)
+    if key == "token" and text:
+        return f"{'*' * 8}{text[-4:]}" if len(text) > 4 else "*" * len(text)
+    return text
+
+
 def _config_list() -> None:
     table = console.table("键", "值", title="gitx 配置")
     for key, value in config.load().items():
-        table.add_row(console.txt(key), console.txt(value))
+        table.add_row(console.txt(key), console.txt(_mask(key, value)))
     console.print(table)
     console.info(f"配置文件: {config.config_path()}")
 
@@ -491,9 +633,15 @@ def doctor() -> None:
     table.add_row("配置文件", console.txt(config.config_path()))
     _, gitver = gitcmd.capture(["git", "--version"])
     table.add_row("git", console.txt(gitver or "未找到"))
+    import shutil  # noqa: PLC0415
+
     gh = shutil.which("gh")
     state = ("已登录" if gitcmd.capture(["gh", "auth", "status"])[0] == 0 else "未登录") if gh else "未安装"
     table.add_row("gh", console.txt(state))
+    table.add_row("API token", console.txt(
+        f"已配置 ({_mask('token', config.load().get('token'))})" if config.load().get("token")
+        else ("复用 gh 的 token" if state == "已登录" else "未配置 (匿名限额 60 次/小时)")))
+    table.add_row("缓存", console.txt(str(config.cache_dir())))
     if gitcmd.is_repo():
         origin = gitcmd.remote_url("origin")
         table.add_row("仓库", console.txt(f"是 | 分支 {gitcmd.current_branch() or '(无提交)'}"
@@ -509,42 +657,14 @@ def doctor() -> None:
     _proxy_test()
 
 
-# ================================================================ 透传与分发
-
-_GIT_CMDS: set[str] | None = None
-
-_SUBCOMMANDS = {"download", "clone", "release", "push", "pull", "sync",
-                "init", "info", "undo", "proxy", "config", "doctor", "git"}
-
-
-def _git_commands() -> set[str]:
-    global _GIT_CMDS
-    if _GIT_CMDS is None:
-        cmds: set[str] = set()
-        rc, out = gitcmd.capture(["git", "help", "-a"])
-        if rc == 0:
-            for line in out.splitlines():
-                for tok in re.split(r"\s+", line.strip()):
-                    if tok and not tok.startswith(("-", "(", "'")):
-                        cmds.add(tok)
-        _GIT_CMDS = cmds
-    return _GIT_CMDS
-
-
-def _is_git_command(name: str) -> bool:
-    if not name or name.startswith("-"):
-        return False
-    return name in _git_commands()
-
-
-def _passthrough(argv: list[str]) -> None:
-    raise SystemExit(subprocess.run(["git", *argv]).returncode)
-
+# ================================================================ 下载分发
 
 def _clear_dest(dest: str) -> None:
     if os.path.lexists(dest):
         if not console.ask(f"目标已存在: {dest}, 要覆盖吗?", default=False):
             console.error("已取消")
+        import shutil  # noqa: PLC0415  懒加载, 少一次标准库导入
+
         if os.path.isdir(dest) and not os.path.islink(dest):
             shutil.rmtree(dest)
         else:
@@ -554,7 +674,8 @@ def _clear_dest(dest: str) -> None:
 def _do_download(url: str, dest: Optional[str], depth: Optional[int], branch: str,
                  proxy: Optional[str], no_proxy: bool, *, list_only: bool = False,
                  assets: Optional[list[str]] = None, source: bool = False,
-                 limit: int = release.DEFAULT_LIMIT) -> None:
+                 limit: int = release.DEFAULT_LIMIT, archive: bool = False,
+                 extract: bool = False, submodules: bool = False, fresh: bool = False) -> None:
     try:
         info = github.parse_url(url)
     except ValueError as exc:
@@ -562,33 +683,22 @@ def _do_download(url: str, dest: Optional[str], depth: Optional[int], branch: st
     prefix = config.active_proxy(proxy, no_proxy)
     if info["mode"] in ("release", "asset"):
         release.run(info, dest or ".", prefix, assets=tuple(assets or ()),
-                    list_only=list_only, source=source, limit=limit)
+                    list_only=list_only, source=source, limit=limit, resume=not fresh)
         return
+    if archive and info["mode"] != "repo":
+        console.error("--archive 只对仓库链接有效 (文件夹/单个文件请直接下载)")
     item_name = os.path.basename(info["path"]) if info["path"] else info["repo"]
     target = dest or item_name
     _clear_dest(target)
     if depth is None:
         depth = int(config.load().get("depth", 1))
-    download.download(url, target, prefix, depth, branch)
-    console.done(f"完成! 已保存到: {target}")
+    download.download(url, target, prefix, depth, branch,
+                      archive=archive, extract=extract, submodules=submodules, resume=not fresh)
 
 
 def main(argv: list[str] | None = None) -> None:
-    """入口: 先分流"git 透传 / GitHub 链接直下", 其余交给 typer 子命令."""
-    argv = list(sys.argv[1:] if argv is None else argv)
-    if argv:
-        first = argv[0]
-        if first in ("-h", "--help", "help"):
-            argv = []
-        elif first in ("-V", "--version"):
-            pass  # 交给 typer 的 --version
-        elif first == "git":
-            _passthrough(argv[1:])
-        elif first not in _SUBCOMMANDS:
-            if _is_git_command(first):
-                _passthrough(argv)
-            argv = ["download", *argv]
-    app(argv)
+    """typer 应用入口 (git 透传 / --version 的快速通道见 dispatch.handle)."""
+    app(list(sys.argv[1:] if argv is None else argv))
 
 
 if __name__ == "__main__":

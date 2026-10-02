@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .cli import main
+from . import main
 
 if __name__ == "__main__":
     main()

@@ -1,17 +1,24 @@
-"""仓库级操作: 初始化 / 概览 / 撤销提交.
+"""仓库级操作: 初始化 / 概览 / 撤销 / 提交图 / 分支 / 维护 / 远端地址.
 
 对应命令:
-  gitx init  分支 main + 中文友好配置 (core.quotepath=false 等)
-  gitx info  状态、与远端领先/落后、最近提交、加速状态
-  gitx undo  撤销最近 N 次提交 (soft/mixed/hard)
+  gitx init      分支 main + 中文友好配置 (core.quotepath=false 等)
+  gitx info      状态、与远端领先/落后、最近提交、加速状态
+  gitx undo      撤销最近 N 次提交 (soft/mixed/hard)
+  gitx graph     提交历史 (git log --graph 上色版)
+  gitx branches  分支表: 上游 / 领先落后 / 最近提交
+  gitx tidy      仓库体积 / 已合并分支 / 打包瘦身
+  gitx url       查看或切换 origin 的地址形态 (accel / https / ssh)
 """
 
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 
-from . import config, console, gitcmd
+from rich.text import Text
+
+from . import accel, config, console, gitcmd, github
 
 
 def init(args: list[str], zh: bool = True) -> None:
@@ -145,3 +152,196 @@ def undo(times: int = 1, mode: str = "soft", path: str = ".", yes: bool = False)
     _behind, ahead = gitcmd.behind_ahead(path)
     if ahead > 0:
         console.info("提示: 撤销的提交若已推送, 再次推送需要加 -f: gitx push -f")
+
+
+# ---------------------------------------------------------------- 提交图 (gitx graph)
+
+_GRAPH_RE = re.compile(r"^(?P<graph>[^0-9a-f]*)(?P<hash>[0-9a-f]{7,40})"
+                       r"(?P<deco> \([^)]*\))?(?P<rest>.*)$")
+
+
+def _ref_style(ref: str) -> str:
+    if ref.startswith("tag: "):
+        return "tag"
+    if ref.startswith("HEAD"):
+        return "bold magenta" if ref == "HEAD" else "branch"
+    if "/" in ref:  # origin/main 之类的远端跟踪分支
+        return "date"
+    return "branch"
+
+
+def _color_line(line: str) -> Text:
+    """给 `git log --graph --oneline` 的一行上色 (图形保留 git 的对齐)."""
+    m = _GRAPH_RE.match(line)
+    if not m:
+        return Text(line, style="graph")
+    out = Text()
+    out.append(m.group("graph"), style="graph")
+    out.append(m.group("hash"), style="hash")
+    deco = m.group("deco")
+    if deco:
+        out.append(" (", style="dim")
+        for i, ref in enumerate(deco[2:-1].split(", ")):
+            if i:
+                out.append(", ", style="dim")
+            out.append(ref, style=_ref_style(ref))
+        out.append(")", style="dim")
+    rest = m.group("rest").strip()
+    if rest:
+        out.append(" " + rest)
+    return out
+
+
+def graph(limit: int = 15, all_refs: bool = False, path: str = ".") -> None:
+    """gitx graph —— 带图形的提交历史 (git log --graph 上色版)."""
+    if not gitcmd.is_repo(path):
+        console.error(f"{path} 不是 git 仓库")
+    if not gitcmd.has_commits(path):
+        console.error("仓库还没有提交 (gitx push 一次就有历史了)")
+    lines = gitcmd.graph_lines(limit, all_refs, path)
+    if not lines:
+        console.error("没有可显示的提交")
+    body = Text()
+    for i, line in enumerate(lines):
+        if i:
+            body.append("\n")
+        body.append_text(_color_line(line))
+    name = os.path.basename(os.path.abspath(path))
+    console.panel(body, title=f"{name} 最近 {len(lines)} 次提交"
+                             + (" (全部引用)" if all_refs else ""), border="cyan")
+    console.info(f"更多: gitx graph -n 50 | gitx graph --all | gitx log --oneline (原生 git)")
+
+
+# ---------------------------------------------------------------- 分支 (gitx branches)
+
+def branches(path: str = ".", *, include_remote: bool = False, limit: int = 20) -> None:
+    """gitx branches —— 分支列表: 上游 / 领先落后 / 最近提交."""
+    if not gitcmd.is_repo(path):
+        console.error(f"{path} 不是 git 仓库")
+    rows = gitcmd.branches_info(path, include_remote)
+    if not rows:
+        console.error("还没有分支 (仓库没有提交)")
+    table = console.table("", "分支", "上游", "同步", "最近提交", "说明",
+                          title=f"分支 {len(rows)} 个" + (" (含远端跟踪)" if include_remote else ""))
+    for row in rows[:limit]:
+        if row["upstream"]:
+            if row["track"] == "[gone]":
+                sync = console.styled("[warn]上游已删除[/warn]")
+            elif row["ahead"] or row["behind"]:
+                sync = console.styled(f"[num]↑{row['ahead']} ↓{row['behind']}[/num]")
+            else:
+                sync = console.styled("[ok]一致[/ok]")
+        else:
+            sync = console.txt("未关联")
+        table.add_row(
+            console.styled("[ok]*[/ok]") if row["head"] else console.txt(""),
+            console.txt(row["name"]),
+            console.txt(row["upstream"] or "-"),
+            sync,
+            console.txt(f"{row['sha']} {row['date']}"),
+            console.txt(row["subject"][:40]),
+        )
+    console.print(table)
+    console.info("切换分支可用原生 git: gitx switch <分支>   |   清理已合并: gitx tidy --prune")
+
+
+# ---------------------------------------------------------------- 维护 (gitx tidy)
+
+def tidy(path: str = ".", *, prune: bool = False, run_gc: bool = False,
+         aggressive: bool = False, yes: bool = False) -> None:
+    """gitx tidy —— 仓库体检: 体积 / 已合并分支 / 打包瘦身."""
+    if not gitcmd.is_repo(path):
+        console.error(f"{path} 不是 git 仓库")
+
+    size = gitcmd.repo_size(path)
+    total = size["loose"] + size["pack"] + size["garbage"]
+    table = console.table("项目", "值", title="仓库体积")
+    table.add_row("松散对象", console.txt(f"{console.human_size(size['loose'])}"
+                                        f" ({size['loose_objects']} 个)"))
+    table.add_row("打包对象", console.txt(f"{console.human_size(size['pack'])}"
+                                        f" ({size['pack_objects']} 个, {size['packs']} 个包)"))
+    table.add_row("垃圾", console.txt(console.human_size(size["garbage"])))
+    table.add_row("合计", console.styled(f"[num]{console.human_size(total)}[/num]"))
+    console.print(table)
+
+    merged = gitcmd.merged_branches(path)
+    if merged:
+        console.info(f"已合并分支 {len(merged)} 个: {', '.join(merged[:8])}"
+                     + (" …" if len(merged) > 8 else ""))
+    else:
+        console.info("没有已合并的本地分支")
+
+    if prune:
+        if not merged:
+            console.warn("没有可清理的分支")
+        else:
+            if not yes and not console.ask(f"删除这 {len(merged)} 个已合并分支?", default=False):
+                console.error("已取消")
+            removed = [name for name in merged if gitcmd.delete_branch(name, path)]
+            console.done(f"已删除 {len(removed)} 个已合并分支")
+
+    if run_gc:
+        console.step("正在打包与清理 (git gc --prune=now)...")
+        if not gitcmd.gc(path, aggressive):
+            console.error("git gc 失败")
+        after = gitcmd.repo_size(path)
+        new_total = after["loose"] + after["pack"] + after["garbage"]
+        console.done(f"打包完成: {console.human_size(total)} -> {console.human_size(new_total)}")
+    else:
+        console.info("打包瘦身: gitx tidy --gc   (可选 --aggressive 更彻底但更慢)")
+
+
+# ---------------------------------------------------------------- 远端地址 (gitx url)
+
+_TRANSPORTS = ("accel", "https", "ssh")
+
+
+def url(path: str = ".", transport: str = "", remote: str = "origin") -> None:
+    """gitx url —— 查看/切换 origin 的地址形态: accel(加速) / https(直连) / ssh."""
+    if not gitcmd.is_repo(path):
+        console.error(f"{path} 不是 git 仓库")
+    names = gitcmd.remote_names(path)
+    if not names:
+        console.error("没有配置远程仓库 (gitx push to <仓库地址> 关联)")
+    if remote not in names:
+        console.error(f"没有名为 {remote} 的远程 (现有: {', '.join(names)})")
+    fetch = gitcmd.remote_url(remote, path)
+    push = gitcmd.remote_push_url(remote, path) or fetch
+
+    if not transport:
+        table = console.table("项目", "值", title=f"远程 {remote}")
+        table.add_row("拉取", console.txt(fetch))
+        table.add_row("推送", console.txt(push))
+        table.add_row("形态", console.styled(_transport_label(fetch, push)))
+        console.print(table)
+        console.info("切换: gitx url accel (拉取加速) | gitx url https (直连) | gitx url ssh")
+        return
+
+    parsed = github.owner_repo(fetch)
+    if not parsed:
+        console.error(f"远程不是 GitHub 地址, 无法自动切换: {fetch}")
+    owner, repo = parsed
+    direct = github.repo_clone_url(owner, repo)
+    if transport == "ssh":
+        target = push_target = f"git@github.com:{owner}/{repo}.git"
+    elif transport == "https":
+        target = push_target = direct
+    else:
+        prefix = config.active_proxy()
+        if not prefix:
+            console.error("当前是直连模式, 先用: gitx proxy on")
+        target = accel.wrap(direct, prefix)
+        push_target = gitcmd.github_push_url(direct)
+    if not gitcmd.set_remote_urls(remote, target, push_target, path):
+        console.error("切换失败, 请检查远程名与地址")
+    console.done(f"{remote} 已切换为 {transport}: 拉取 {target}"
+                 + (f"  推送 {push_target}" if push_target != target else ""))
+
+
+def _transport_label(fetch: str, push: str) -> str:
+    """按地址形态给出人话标签."""
+    if fetch.startswith("git@"):
+        return "[tag]ssh[/tag]"
+    if fetch.startswith("https://github.com/"):
+        return "[ok]https 直连[/ok]"
+    return f"[num]加速[/num] {push.startswith('git@') and '(推送走 ssh)' or ''}".strip()

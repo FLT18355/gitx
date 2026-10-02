@@ -13,6 +13,7 @@ DEFAULTS: dict[str, object] = {
     "depth": 1,           # 克隆深度, 0 = 完整克隆
     "branch": "",         # 默认分支, 空 = 自动探测
     "message": "日常同步更新",  # push 默认提交信息
+    "token": "",          # GitHub token: 提高 API 限额 (60 -> 5000 次/小时)
 }
 
 
@@ -23,6 +24,12 @@ def config_dir() -> Path:
 
 def config_path() -> Path:
     return config_dir() / "config.json"
+
+
+def cache_dir() -> Path:
+    """缓存目录 (~/.cache/gitx): 存放可再生的数据, 删掉也不影响使用."""
+    xdg = os.environ.get("XDG_CACHE_HOME")
+    return Path(xdg) / "gitx" if xdg else Path.home() / ".cache" / "gitx"
 
 
 def load() -> dict:

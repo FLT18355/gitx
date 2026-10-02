@@ -2,23 +2,26 @@
 
 所有函数都会对动态文本做 markup 转义, 因此仓库名、文件名里的 `[]` 等字符不会
 被 rich 当成样式标签; 需要自己写样式的场合请直接用 `console.print` 或 `txt()`.
+
+启动速度: rich.progress / rich.prompt / questionary 都改为按需导入 —— 它们是
+重依赖 (合计约 2.3 秒), 只有下载与交互挑选才用得上。
 """
 
 from __future__ import annotations
 
 import sys
 from contextlib import contextmanager
-from typing import Any, Iterator, NoReturn, Sequence
+from typing import TYPE_CHECKING, Any, Iterator, NoReturn, Sequence
 
 from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
-from rich.progress import (BarColumn, DownloadColumn, Progress, SpinnerColumn,
-                           TextColumn, TimeRemainingColumn, TransferSpeedColumn)
-from rich.prompt import Prompt
 from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
+
+if TYPE_CHECKING:  # 仅供类型检查, 运行时不导入
+    from rich.progress import Progress
 
 THEME = Theme({
     "info": "green",
@@ -29,8 +32,15 @@ THEME = Theme({
     "key": "bold cyan",
     "num": "bold yellow",
     "dim": "dim",
+    "title": "bold cyan",
+    "hash": "yellow",
+    "graph": "green",
+    "branch": "bold cyan",
+    "tag": "magenta",
+    "date": "dim cyan",
 })
 
+# 提示符: [+] 信息  [*] 进行中  [ok] 完成  [!] 警告  [-] 错误  [?] 询问
 console = Console(theme=THEME, highlight=False)
 err_console = Console(theme=THEME, stderr=True, highlight=False)
 
@@ -38,6 +48,16 @@ err_console = Console(theme=THEME, stderr=True, highlight=False)
 def txt(value: Any) -> Text:
     """把任意值变成不做 markup 解析的 Text (表格 / 面板里放动态内容时用)."""
     return Text(str(value))
+
+
+def styled(markup: str) -> Text:
+    """固定样式的 Text (内容由代码写死时用; 动态值请走 txt())."""
+    return Text.from_markup(markup)
+
+
+def link(value: Any, url: str) -> Text:
+    """可点击的超链接 (终端不支持时退化为普通文本)."""
+    return Text(str(value), style=f"link {url}")
 
 
 def print(message: Any = "", **kwargs: Any) -> None:  # noqa: A001
@@ -75,12 +95,26 @@ def panel(body: Any, title: str = "", border: str = "cyan") -> None:
 
 
 def table(*columns: str, title: str = "") -> Table:
-    """建一个统一样式的表格; 单元格请用 txt() 包住动态文本."""
-    t = Table(title=title or None, title_justify="left", title_style="key",
+    """建一个统一样式的表格; 单元格请用 txt() / styled() 包住."""
+    t = Table(title=title or None, title_justify="left", title_style="title",
               header_style="key", border_style="dim", pad_edge=False, expand=False)
     for name in columns:
         t.add_column(name, overflow="fold")
     return t
+
+
+def hint(message: Any) -> None:
+    """次要提示: 缩进 + 暗淡, 跟在错误/结果后面."""
+    console.print(f"    [dim]{escape(str(message))}[/dim]")
+
+
+def columns(items: Sequence[str], title: str = "", width: int = 26) -> None:
+    """多列排布的清单 (模板名 / 标签等); rich.columns 按需导入."""
+    from rich.columns import Columns
+
+    if title:
+        console.print(f"[title]{escape(title)}[/title]")
+    console.print(Columns(sorted(items), width=width, padding=(0, 2), expand=False))
 
 
 def human_size(n: float) -> str:
@@ -97,17 +131,15 @@ def ask(question: str, default: bool | None = None) -> bool:
     """询问 y/n; 非交互环境使用 default(没有 default 视为 False)."""
     if not sys.stdin.isatty():
         return bool(default)
-    fallback = "" if default is None else ("y" if default else "n")
-    hint = " [Y/n] " if default is True else " [y/N] " if default is False else " [y/n] "
+    hint_text = " [Y/n] " if default is True else " [y/N] " if default is False else " [y/n] "
     try:
-        answer = Prompt.ask(f"[step]\\[?][/step] {escape(question)}{hint}", default=fallback,
-                            show_default=False)
+        answer = console.input(f"[step]\\[?][/step] {escape(question)}{hint_text}").strip()
     except (EOFError, KeyboardInterrupt):
         console.print()
         return bool(default)
-    if not answer.strip() and default is not None:
+    if not answer and default is not None:
         return default
-    return answer.strip().lower() in ("y", "yes", "是", "对", "1")
+    return answer.lower() in ("y", "yes", "是", "对", "1")
 
 
 def is_terminal() -> bool:
@@ -134,7 +166,7 @@ MAX_VISIBLE = 5  # 交互列表最多同时渲染几行, 超出的部分靠上�
 def _picker(multi: bool, message: str, labels: Sequence[str], instruction: str) -> Any:
     """建一个 questionary 选择器 (列表窗口压到 MAX_VISIBLE 行, 打字即筛选).
 
-    questionary 会连带拉进 prompt_toolkit (导入约 1 秒), 所以只在这里延迟加载,
+    questionary 会连带拉进 prompt_toolkit (导入约 2 秒), 所以只在这里延迟加载,
     普通命令不必付这份启动开销.
     """
     import questionary
@@ -169,7 +201,10 @@ def check(message: str, labels: Sequence[str], *, instruction: str = "") -> list
 
 
 def progress() -> Progress:
-    """带速率与剩余时间的下载进度条."""
+    """带速率与剩余时间的下载进度条 (rich.progress 按需导入)."""
+    from rich.progress import (BarColumn, DownloadColumn, Progress, SpinnerColumn,
+                               TextColumn, TimeRemainingColumn, TransferSpeedColumn)
+
     return Progress(
         SpinnerColumn(style="step"),
         TextColumn("[progress.description]{task.description}"),
@@ -193,15 +228,38 @@ def spinner(message: str) -> Iterator[None]:
         yield
 
 
-def save_stream(resp: Any, dest_path: str, label: str, total: int = 0) -> int:
-    """把 HTTP 响应流写入文件, 交互终端显示进度条; 返回写入字节数."""
-    size = total or _content_length(resp)
+_CHUNK = 1 << 17  # 128 KiB: 减少读写循环次数
+
+
+def save_stream(resp: Any, dest_path: str, label: str, total: int = 0, *,
+                start: int = 0, append: bool = False) -> int:
+    """把 HTTP 响应流写入文件, 交互终端显示进度条; 返回本次写入的字节数.
+
+    start/append 用于断点续传: 文件已有 start 字节时以 "ab" 追加, 进度条从 start 起算。
+    """
+    size = total or _response_total(resp, start)
+    mode = "ab" if append else "wb"
     if console.is_terminal:
         with progress() as bar:
-            task = bar.add_task(escape(label), total=size or None)
-            return _copy(resp, dest_path, lambda n: bar.advance(task, n))
-    step(f"下载 {label}" + (f" ({human_size(size)})" if size else ""))
-    return _copy(resp, dest_path, None)
+            task = bar.add_task(escape(label), total=size or None, completed=start)
+            return _copy(resp, dest_path, lambda n: bar.advance(task, n), mode)
+    step(f"下载 {label}" + (f" ({human_size(size)})" if size else "")
+         + (f" [续传 {human_size(start)}]" if start else ""))
+    return _copy(resp, dest_path, None, mode)
+
+
+def _response_total(resp: Any, start: int) -> int:
+    """完整文件大小: Content-Range 的总量优先, 否则 start + Content-Length."""
+    try:
+        content_range = resp.headers.get("Content-Range") or ""
+    except AttributeError:
+        content_range = ""
+    if "/" in content_range:
+        try:
+            return int(content_range.rsplit("/", 1)[1])
+        except ValueError:
+            pass
+    return start + _content_length(resp)
 
 
 def _content_length(resp: Any) -> int:
@@ -211,10 +269,10 @@ def _content_length(resp: Any) -> int:
         return 0
 
 
-def _copy(resp: Any, dest_path: str, on_chunk: Any) -> int:
+def _copy(resp: Any, dest_path: str, on_chunk: Any, mode: str = "wb") -> int:
     written = 0
-    with open(dest_path, "wb") as f:
-        while chunk := resp.read(1 << 16):
+    with open(dest_path, mode) as f:
+        while chunk := resp.read(_CHUNK):
             f.write(chunk)
             written += len(chunk)
             if on_chunk:

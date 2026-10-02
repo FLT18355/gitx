@@ -13,18 +13,12 @@
 from __future__ import annotations
 
 import fnmatch
-import json
 import os
-import re
-import urllib.error
-import urllib.request
 
 from rich.markup import escape
 
-from . import accel, console, gitcmd, github
+from . import console, github, net
 
-_HEADERS = {"User-Agent": "gitx", "Accept": "application/vnd.github+json"}
-_TARGET_RE = re.compile(r"^([\w.-]+)/([\w.-]+)$")
 DEFAULT_LIMIT = 10  # 发布列表默认条数 (--limit 可改, GitHub 上限 100)
 MAX_LIMIT = 100
 
@@ -38,18 +32,19 @@ def parse_target(arg: str) -> dict:
         if info["mode"] not in ("release", "asset"):
             console.error("这不是发布页链接 (示例: https://github.com/owner/repo/releases)")
         return info
-    m = _TARGET_RE.match(arg)
-    if not m:
-        console.error(f"无法识别: {arg}\n用法: gitx release <owner/repo|发布页链接> [选项]")
-    return {"mode": "release", "owner": m.group(1), "repo": m.group(2),
-            "branch": "", "path": "", "tag": ""}
+    try:
+        owner, repo = github.parse_repo(arg)
+    except ValueError as exc:
+        console.error(f"{exc}\n用法: gitx release <owner/repo|发布页链接> [选项]")
+    return {"mode": "release", "owner": owner, "repo": repo, "branch": "", "path": "", "tag": ""}
 
 
 # ---------------------------------------------------------------- 入口
 
 def run(info: dict, dest: str, prefix: str | None, *, tag: str = "",
         assets: tuple[str, ...] = (), list_only: bool = False, tags: bool = False,
-        pick: bool = False, source: bool = False, limit: int = DEFAULT_LIMIT) -> None:
+        pick: bool = False, source: bool = False, limit: int = DEFAULT_LIMIT,
+        resume: bool = True) -> None:
     """列出或下载 Release 附件; dest 为目录, 不存在则创建.
 
     给出 --tag / --asset 时完全非交互; 什么都不给且处于终端时, 依次挑选发布与附件
@@ -67,7 +62,7 @@ def run(info: dict, dest: str, prefix: str | None, *, tag: str = "",
             console.error("附件链接缺少标签, 请用 --tag 指定")
         name = os.path.basename(info["path"])
         url = github.github_url(owner, repo, f"/releases/download/{tag}/{info['path']}")
-        saved = fetch_asset(url, os.path.join(dest, name), prefix)
+        saved = fetch_asset(url, os.path.join(dest, name), prefix, resume=resume)
         if saved:
             console.done(f"完成! 已保存到: {os.path.abspath(saved)}")
         return
@@ -103,13 +98,14 @@ def run(info: dict, dest: str, prefix: str | None, *, tag: str = "",
     for asset in picked:
         name = str(asset.get("name", ""))
         saved = fetch_asset(str(asset.get("browser_download_url", "")),
-                            os.path.join(dest, name), prefix, int(asset.get("size") or 0))
+                            os.path.join(dest, name), prefix, int(asset.get("size") or 0),
+                            resume=resume)
         total += 1 if saved else 0
     if source or not picked:
         if not picked:
             console.warn("该 Release 没有匹配的附件, 改为下载源码包")
         url = str(rel.get("tarball_url") or github.api_url(owner, repo, f"/tarball/{rel_tag}"))
-        saved = fetch_asset(url, os.path.join(dest, f"{repo}-{rel_tag}.tar.gz"), prefix)
+        saved = fetch_asset(url, os.path.join(dest, f"{repo}-{rel_tag}.tar.gz"), prefix, resume=resume)
         total += 1 if saved else 0
     console.done(f"完成: 共 {total} 个文件 -> {os.path.abspath(dest)}")
 
@@ -122,7 +118,7 @@ def fetch_release(owner: str, repo: str, tag: str, prefix: str | None) -> dict:
         path = f"/releases/tags/{tag}"
     else:
         path = "/releases/latest"
-    data = api(github.api_url(owner, repo, path), prefix)
+    data = github.api(github.api_url(owner, repo, path), prefix)
     if not isinstance(data, dict):
         console.error("Release 数据异常, 请稍后重试")
     return data
@@ -131,7 +127,7 @@ def fetch_release(owner: str, repo: str, tag: str, prefix: str | None) -> dict:
 def fetch_releases(owner: str, repo: str, prefix: str | None, limit: int = DEFAULT_LIMIT) -> list[dict]:
     """最近的发布列表 (含预发布), 按发布时间从新到旧."""
     limit = max(1, min(int(limit), MAX_LIMIT))
-    data = api(github.api_url(owner, repo, f"/releases?per_page={limit}"), prefix)
+    data = github.api(github.api_url(owner, repo, f"/releases?per_page={limit}"), prefix)
     if not isinstance(data, list) or not data:
         console.error(f"{owner}/{repo} 还没有已发布的 Release")
     return data
@@ -181,32 +177,6 @@ def choose_release(releases: list) -> dict | None:
     index = console.select(f"选择要下载的发布 (共 {len(releases)} 个, 输入标签或名称即筛选)",
                            labels, instruction="[↑↓] 选择  [输入] 筛选  [回车] 确认")
     return None if index is None else releases[index]
-
-
-def api(url: str, prefix: str | None) -> object:
-    """请求 GitHub API (走加速); 已登录 gh 时复用其 token 提高限额."""
-    req = urllib.request.Request(accel.wrap(url, prefix), headers=dict(_HEADERS))
-    token = gh_token()
-    if token:
-        req.add_header("Authorization", f"Bearer {token}")
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return json.loads(r.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        if exc.code == 404:
-            console.error("未找到该 Release\n提示: 仓库可能没有发布, 或用 --tags 查看可用标签")
-        if exc.code in (403, 429):
-            console.error(f"GitHub API 受限 HTTP {exc.code}: 匿名请求每小时 60 次\n"
-                          "提示: 已登录 gh 时自动复用其 token (5000 次/小时)")
-        console.error(f"API 请求失败 HTTP {exc.code}: {url}")
-    except (urllib.error.URLError, OSError) as exc:
-        console.error(f"API 请求失败: {exc}\n提示: gitx proxy test 检查加速源, 或 --no-proxy 直连")
-    return None
-
-
-def gh_token() -> str:
-    rc, out = gitcmd.capture(["gh", "auth", "token"])
-    return out if rc == 0 else ""
 
 
 # ---------------------------------------------------------------- 展示
@@ -273,23 +243,15 @@ def choose_assets(assets: list) -> list | None:
 
 # ---------------------------------------------------------------- 下载
 
-def fetch_asset(url: str, dest_path: str, prefix: str | None, size: int = 0) -> str:
+def fetch_asset(url: str, dest_path: str, prefix: str | None, size: int = 0,
+                *, resume: bool = True) -> str:
     """下载单个附件到 dest_path; 已存在时询问, 跳过则返回空串."""
     if not url:
         console.error("附件地址为空, 无法下载")
     if os.path.lexists(dest_path) and not console.ask(f"文件已存在: {dest_path}, 覆盖吗?", default=False):
         console.warn(f"跳过: {os.path.basename(dest_path)}")
         return ""
-    parent = os.path.dirname(os.path.abspath(dest_path))
-    os.makedirs(parent, exist_ok=True)
-    req = urllib.request.Request(accel.wrap(url, prefix), headers=dict(_HEADERS))
-    try:
-        with urllib.request.urlopen(req, timeout=300) as resp:
-            console.save_stream(resp, dest_path, os.path.basename(dest_path), size)
-    except urllib.error.HTTPError as exc:
-        console.error(f"下载失败 HTTP {exc.code}: {url}")
-    except (urllib.error.URLError, OSError) as exc:
-        console.error(f"下载失败: {exc}")
+    net.fetch(url, dest_path, prefix=prefix, headers=github.HEADERS, size=size, resume=resume)
     console.done(f"{os.path.basename(dest_path)} {console.human_size(os.path.getsize(dest_path))}"
                  + (" [加速]" if prefix else ""))
     return dest_path

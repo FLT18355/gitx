@@ -19,10 +19,16 @@ ZH_CONFIG: dict[str, str] = {
 
 def apply_zh_config(scope: str = "--local", path: str = ".") -> list[str]:
     """写入中文友好配置, 返回本次实际改动的键名."""
+    rc, out = capture(["git", "-C", path, "config", scope, "--list"])
+    current: dict[str, str] = {}
+    if rc == 0:
+        for line in out.splitlines():
+            key, sep, value = line.partition("=")
+            if sep:
+                current[key.strip().lower()] = value
     changed: list[str] = []
     for key, value in ZH_CONFIG.items():
-        rc, cur = capture(["git", "-C", path, "config", scope, "--get", key])
-        if rc == 0 and cur == value:
+        if current.get(key.lower()) == value:
             continue
         subprocess.run(["git", "-C", path, "config", scope, key, value],
                        check=False, capture_output=True)
@@ -277,4 +283,116 @@ def pull(path: str = ".", rebase: bool = False, prefix: str | None = None) -> bo
     args.append("pull")
     if rebase:
         args.append("--rebase")
+    return subprocess.run(args).returncode == 0
+
+
+# ---------------------------------------------------------------- 分支概览
+
+# 单次 for-each-ref 拿到全部分支信息 (逐个分支起进程会慢一个数量级)
+_BRANCH_FMT = "%00".join((
+    "%(refname:short)", "%(upstream:short)", "%(upstream:track)", "%(HEAD)",
+    "%(committerdate:relative)", "%(objectname:short)", "%(subject)",
+))
+
+
+def branches_info(path: str = ".", include_remote: bool = False) -> list[dict]:
+    """分支列表 (按最近提交排序); include_remote 时含 refs/remotes 下的跟踪分支."""
+    refs = ["refs/heads", "refs/remotes"] if include_remote else ["refs/heads"]
+    rc, out = capture(["git", "-C", path, "for-each-ref", f"--format={_BRANCH_FMT}",
+                       "--sort=-committerdate", *refs])
+    if rc != 0:
+        return []
+    rows: list[dict] = []
+    for line in out.splitlines():
+        parts = (line.split("\x00") + [""] * 7)[:7]
+        ahead, behind = _parse_track(parts[2])
+        rows.append({
+            "name": parts[0], "upstream": parts[1], "track": parts[2],
+            "head": parts[3].strip() == "*", "date": parts[4],
+            "sha": parts[5], "subject": parts[6], "ahead": ahead, "behind": behind,
+        })
+    return rows
+
+
+def _parse_track(track: str) -> tuple[int, int]:
+    """'[ahead 1, behind 2]' -> (1, 2); git 的 track 输出是英文, 不受语言影响."""
+    ahead = behind = 0
+    for kind, num in re.findall(r"(ahead|behind) (\d+)", track):
+        if kind == "ahead":
+            ahead = int(num)
+        else:
+            behind = int(num)
+    return ahead, behind
+
+
+def graph_lines(limit: int = 15, all_refs: bool = False, path: str = ".") -> list[str]:
+    """`git log --graph --oneline` 的原始行 (由调用方上色渲染)."""
+    args = ["git", "-C", path, "log", "--graph", "--oneline", "--decorate=short",
+            "--color=never", "-n", str(limit)]
+    if all_refs:
+        args.append("--all")
+    rc, out = capture(args)
+    return out.splitlines() if rc == 0 else []
+
+
+def remote_names(path: str = ".") -> list[str]:
+    _, out = capture(["git", "-C", path, "remote"])
+    return out.splitlines()
+
+
+def set_remote_urls(name: str, fetch: str, push: str = "", path: str = ".") -> bool:
+    """原地改 remote 地址 (ensure_remote 会先删后加, 这里保留其它配置)."""
+    ok = subprocess.run(["git", "-C", path, "remote", "set-url", name, fetch],
+                        capture_output=True).returncode == 0
+    if push and push != fetch:
+        ok = subprocess.run(["git", "-C", path, "remote", "set-url", "--push", name, push],
+                            capture_output=True).returncode == 0 and ok
+    return ok
+
+
+# ---------------------------------------------------------------- 维护
+
+def repo_size(path: str = ".") -> dict[str, int]:
+    """仓库体积 (字节): loose 松散对象 / pack 打包 / garbage 垃圾, 以及对象计数.
+
+    用 `count-objects -v` 的数值字段 (KiB), 避开 -H 输出的本地化单位。
+    """
+    rc, out = capture(["git", "-C", path, "count-objects", "-v"])
+    data: dict[str, int] = {}
+    if rc == 0:
+        for line in out.splitlines():
+            key, _, value = line.partition(": ")
+            try:
+                data[key.strip()] = int(value.strip())
+            except ValueError:
+                continue
+    return {
+        "loose": data.get("size", 0) * 1024,
+        "pack": data.get("size-pack", 0) * 1024,
+        "garbage": data.get("size-garbage", 0) * 1024,
+        "loose_objects": data.get("count", 0),
+        "pack_objects": data.get("in-pack", 0),
+        "packs": data.get("packs", 0),
+    }
+
+
+def merged_branches(path: str = ".", target: str = "HEAD") -> list[str]:
+    """已合入 target 的本地分支名 (不含当前分支)."""
+    rc, out = capture(["git", "-C", path, "branch", "--merged", target, "--format=%(refname:short)"])
+    if rc != 0:
+        return []
+    current = current_branch(path)
+    return [name for name in out.splitlines() if name and name != current]
+
+
+def delete_branch(name: str, path: str = ".", force: bool = False) -> bool:
+    return subprocess.run(["git", "-C", path, "branch", "-D" if force else "-d", name],
+                          capture_output=True).returncode == 0
+
+
+def gc(path: str = ".", aggressive: bool = False) -> bool:
+    """打包与清理: `git gc --prune=now` (可选 --aggressive)."""
+    args = ["git", "-C", path, "gc", "--prune=now"]
+    if aggressive:
+        args.append("--aggressive")
     return subprocess.run(args).returncode == 0

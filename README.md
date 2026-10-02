@@ -4,13 +4,14 @@
 
 默认走加速镜像 `https://v6.gh-proxy.org` 拉取, 推送直连 GitHub(镜像不支持推送)。
 
-命令行用 **Typer + Rich** 构建: 分组式帮助、彩色表格、下载进度条(速率 / 剩余时间)。
+命令行用 **Typer + Rich** 构建: 分组式帮助、彩色表格、下载进度条(速率 / 剩余时间);
+交互式挑选(Release 发布 / 附件)用 **questionary**: 上下键选择、最多渲染 5 行、打字即筛选。
 
 ## 安装
 
 ```bash
 cd Gitx
-uv sync          # 创建环境并安装 (依赖 typer / rich)
+uv sync          # 创建环境并安装 (依赖 typer / rich / questionary)
 uv run gitx -h   # 或: uv run python -m gitx --help
 ```
 
@@ -42,9 +43,11 @@ gitx release owner/repo --source            # 额外下载源码包(tarball)
 gitx release owner/repo -o ~/下载           # 指定保存目录
 ```
 
-终端里直接 `gitx release owner/repo` 会先打印发布列表(编号 / 标签 / 名称 / 日期 / 附件数 / 是否预发布,
-默认最近 10 个, 用 `-n/--limit` 调整), 输入编号或**标签名**选择, 直接回车取最新; 然后打印附件表,
-输入 `1,3-4` 选择, `a` 或回车取全部。
+终端里直接 `gitx release owner/repo` 进入**上下键交互**: 先用 ↑↓ 挑发布(默认最近 10 个, 用 `-n/--limit` 调整),
+列表最多同时渲染 5 行, 多出来的随光标滚动; 直接打字(标签 / 名称)即实时筛选, 回车确认(默认最新)。
+接着挑附件: ↑↓ 移动、空格勾选、打字筛选, 回车确认 —— 一个都没勾就下全部。
+Ctrl+C 随时取消。
+
 给了 `--tag` / `--asset` 或不在终端(管道/脚本)时完全非交互, 行为与旧版一致(最新发布 + 全部附件)。
 
 链接形式同样可用:
@@ -57,7 +60,8 @@ gitx https://github.com/owner/repo/releases --list              # 只看清单
 
 实现要点: 走 `api.github.com/repos/{owner}/{repo}/releases`(经加速镜像访问), 已登录 `gh` 时自动
 复用其 token(限额 60 → 5000 次/小时); 附件按 `browser_download_url` 直下并显示进度条;
-该 Release 没有附件时自动回退到源码包。
+该 Release 没有附件时自动回退到源码包; 交互式选择由 `console.select` / `console.check` 封装
+questionary(选项窗口固定为 `console.MAX_VISIBLE = 5` 行, 超出部分随光标滚动)。
 
 ### 同步
 
@@ -136,7 +140,7 @@ gitx status / gitx log --oneline   # git 子命令直接透传 (原生 init: git
 src/gitx/
   __init__.py   版本与入口        cli.py      Typer 应用: 命令定义 / 分发 / 透传
   console.py    rich 控制台       config.py   持久化配置 (~/.config/gitx/config.json)
-                (表格/进度条/交互)
+                (表格/进度条/questionary 交互选择)
   accel.py      加速源与测速      gitcmd.py   git 命令封装 (状态/领先落后/撤销原语)
   github.py     URL 解析         download.py 仓库/文件夹/文件下载
   release.py    Release 附件(API) repo.py     init / info / undo

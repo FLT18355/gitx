@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sys
 from contextlib import contextmanager
-from typing import Any, Iterator, NoReturn
+from typing import Any, Iterator, NoReturn, Sequence
 
 from rich.console import Console
 from rich.markup import escape
@@ -115,15 +115,57 @@ def is_terminal() -> bool:
     return console.is_terminal
 
 
-def prompt(message: str, default: str = "") -> str:
-    """自由文本输入; 非交互环境返回 default."""
-    if not sys.stdin.isatty():
-        return default
-    try:
-        return Prompt.ask(f"[step]\\[?][/step] {escape(message)}", default=default, show_default=bool(default))
-    except (EOFError, KeyboardInterrupt):
-        console.print()
-        return default
+PICKER_STYLE = (
+    ("qmark", "fg:cyan bold"),
+    ("question", "bold"),
+    ("pointer", "fg:cyan bold"),
+    ("highlighted", "fg:cyan bold"),
+    ("selected", "fg:cyan"),
+    ("answer", "fg:cyan bold"),
+    ("instruction", "fg:#808080"),
+    ("search_success", "fg:cyan"),
+    ("search_none", "fg:red italic"),
+    ("separator", "fg:#808080"),
+    ("disabled", "fg:#808080 italic"),
+)
+MAX_VISIBLE = 5  # 交互列表最多同时渲染几行, 超出的部分靠上下键滚动
+
+
+def _picker(multi: bool, message: str, labels: Sequence[str], instruction: str) -> Any:
+    """建一个 questionary 选择器 (列表窗口压到 MAX_VISIBLE 行, 打字即筛选).
+
+    questionary 会连带拉进 prompt_toolkit (导入约 1 秒), 所以只在这里延迟加载,
+    普通命令不必付这份启动开销.
+    """
+    import questionary
+    from prompt_toolkit.layout.dimension import LayoutDimension
+    from questionary.prompts.common import InquirerControl
+
+    build = questionary.checkbox if multi else questionary.select
+    question = build(
+        message,
+        choices=[questionary.Choice(title=label, value=i) for i, label in enumerate(labels)],
+        instruction=instruction or None,
+        style=questionary.Style(PICKER_STYLE),
+        use_search_filter=True,
+        use_jk_keys=False,  # 搜索优先: j/k 让位给筛选输入
+    )
+    height = LayoutDimension.exact(min(len(labels), MAX_VISIBLE))
+    for window in question.application.layout.find_all_windows():
+        if isinstance(window.content, InquirerControl):
+            window.height = height  # 超出部分由 prompt_toolkit 随光标滚动
+    return question.ask()  # Ctrl+C -> None
+
+
+def select(message: str, labels: Sequence[str], *, instruction: str = "") -> int | None:
+    """上下键单选, 直接打字即筛选; 返回下标, 中断返回 None."""
+    return _picker(False, message, labels, instruction)
+
+
+def check(message: str, labels: Sequence[str], *, instruction: str = "") -> list[int] | None:
+    """上下键多选 (空格勾选), 直接打字即筛选; 返回下标 (升序), 中断返回 None."""
+    picked = _picker(True, message, labels, instruction)
+    return None if picked is None else sorted(picked)
 
 
 def progress() -> Progress:

@@ -78,6 +78,9 @@ def run(info: dict, dest: str, prefix: str | None, *, tag: str = "",
         rel = fetch_release(owner, repo, tag, prefix)
     elif choose:
         rel = choose_release(fetch_releases(owner, repo, prefix, limit))
+        if rel is None:
+            console.warn("已取消下载")
+            return
     else:
         rel = fetch_release(owner, repo, "", prefix)
 
@@ -92,7 +95,7 @@ def run(info: dict, dest: str, prefix: str | None, *, tag: str = "",
     picked = _filter(all_assets, assets)
     if choose and picked:
         picked = choose_assets(picked)
-        if not picked:
+        if picked is None:
             console.warn("已取消下载")
             return
 
@@ -157,28 +160,27 @@ def list_releases(owner: str, repo: str, prefix: str | None, limit: int = DEFAUL
                  f"  |  多看几个: --limit {min(limit * 2, MAX_LIMIT)}")
 
 
-def choose_release(releases: list) -> dict:
-    """交互式挑选发布 (含预发布); 非交互环境用最新发布."""
+def _release_label(index: int, rel: dict) -> str:
+    """发布列表一行: 编号 / 标签 / 名称 / 日期 / 附件数 / 预发布."""
+    meta = [str(rel.get("published_at") or "")[:10],
+            f"附件 {len(rel.get('assets') or [])}"]
+    if rel.get("prerelease"):
+        meta.append("预发布")
+    head = "  ".join(str(rel.get(key) or "") for key in ("tag_name", "name")).strip()
+    return f"{index}. {head}  ({', '.join(m for m in meta if m)})"
+
+
+def choose_release(releases: list) -> dict | None:
+    """上下键挑选发布 (输入标签/名称即筛选); 非交互环境用最新发布, Ctrl+C 返回 None."""
     if not console.is_terminal():
         console.warn("非交互环境, 使用最新发布")
         return releases[0]
     if len(releases) == 1:
         return releases[0]
-    print_releases_table(releases, f"选择要下载的发布 (共 {len(releases)} 个, 用 --limit 调整)")
-    answer = console.prompt("编号或标签名 (回车 = 1)").strip()
-    if not answer:
-        return releases[0]
-    if answer.isdigit():
-        index = int(answer)
-        if 1 <= index <= len(releases):
-            return releases[index - 1]
-        console.warn(f"编号超出范围: {answer}, 使用最新发布")
-        return releases[0]
-    for rel in releases:
-        if str(rel.get("tag_name") or "") == answer:
-            return rel
-    console.warn(f"没有该标签: {answer}, 使用最新发布")
-    return releases[0]
+    labels = [_release_label(i, rel) for i, rel in enumerate(releases, 1)]
+    index = console.select(f"选择要下载的发布 (共 {len(releases)} 个, 输入标签或名称即筛选)",
+                           labels, instruction="[↑↓] 选择  [输入] 筛选  [回车] 确认")
+    return None if index is None else releases[index]
 
 
 def api(url: str, prefix: str | None) -> object:
@@ -248,8 +250,8 @@ def _filter(assets: list, patterns: tuple[str, ...]) -> list:
     return picked
 
 
-def choose_assets(assets: list) -> list:
-    """交互式挑选附件; 非交互环境取全部."""
+def choose_assets(assets: list) -> list | None:
+    """上下键挑选附件 (空格勾选, 输入名称即筛选); 非交互环境取全部, Ctrl+C 返回 None."""
     if not assets:
         return []
     if not console.is_terminal():
@@ -257,36 +259,16 @@ def choose_assets(assets: list) -> list:
         return list(assets)
     if len(assets) == 1:
         return list(assets)
-    table = console.table("#", "附件", "大小", title="选择要下载的附件")
-    for i, asset in enumerate(assets, 1):
-        table.add_row(console.txt(i), console.txt(asset.get("name") or ""),
-                      console.txt(console.human_size(int(asset.get("size") or 0))))
-    console.print(table)
-    answer = console.prompt("编号 (如 1,3-4; a = 全部; 回车 = 全部)").strip().lower()
-    if not answer or answer in ("a", "all", "全部"):
-        return list(assets)
-    indexes = _parse_indexes(answer, len(assets))
-    picked = [assets[i - 1] for i in indexes]
+    labels = [f"{asset.get('name') or ''}  ({console.human_size(int(asset.get('size') or 0))})"
+              for asset in assets]
+    picked = console.check(f"选择要下载的附件 (共 {len(assets)} 个, 输入名称即筛选)", labels,
+                           instruction="[↑↓] 选择  [空格] 勾选  [输入] 筛选  [回车] 确认 (不勾选 = 全部)")
+    if picked is None:
+        return None
     if not picked:
-        console.warn("没有选中任何附件, 已取消")
-    return picked
-
-
-def _parse_indexes(answer: str, count: int) -> list[int]:
-    """解析 '1,3-4' 形式的编号输入, 去重并保持顺序."""
-    indexes: list[int] = []
-    for part in answer.replace(" ", ",").split(","):
-        if not part:
-            continue
-        lo, _, hi = part.partition("-")
-        try:
-            start = int(lo)
-            end = int(hi) if hi else start
-        except ValueError:
-            console.warn(f"忽略无法识别的输入: {part}")
-            continue
-        indexes += [i for i in range(start, end + 1) if 1 <= i <= count]
-    return list(dict.fromkeys(indexes))
+        console.info("没有勾选任何附件, 下载全部")
+        return list(assets)
+    return [assets[i] for i in picked]
 
 
 # ---------------------------------------------------------------- 下载

@@ -2,6 +2,10 @@
 
 给中国人用的 GitHub 加速与同步工具 —— 下载 / 同步 / 加速, 一条命令搞定。
 
+> **v1.0.0: 1.0 正式版** —— 补齐日常 git 操作, 从"加速下载工具"变成"日常用得上"的命令行:
+> 分支 (`branch` / `switch` / `merge` / `rebase` / `fetch`)、暂存 (`stash`)、标签 (`tag`)、
+> 提交 (`commit`)、改动查看与回退 (`diff` / `discard` / `clean`);
+> 内部统一了前置检查与推送直连逻辑。每个 Release 同时提供**源码包**与 **uv 构建的 wheel**。
 > v0.6.1: 新增 `gitx stat` —— 一条命令看仓库的 star / fork / topics / 语言 / 许可证 /
 > 贡献者 / 最新发布 (表格展示, `--json` 供脚本)。
 > v0.6.0: 新增图表 / 分支 / 体检 / 远端切换 / 搜索 / 网页 / .gitignore 模板,
@@ -18,6 +22,12 @@
 cd Gitx
 uv sync          # 创建环境并安装 (依赖 typer / rich / questionary)
 uv run gitx -h   # 或: uv run python -m gitx --help
+```
+
+或者从 Release 附件安装 (每个版本都提供**源码包**与 **uv 构建的 wheel** 两个文件):
+
+```bash
+uv tool install gitx-1.0.0-py3-none-any.whl    # 或: uv tool install .
 ```
 
 ## 用法
@@ -104,6 +114,7 @@ gitx push to https://github.com/owner/repo   # 首次关联远程并推送
 gitx push -f                        # 强制推送
 gitx pull                           # 拉取(走加速)
 gitx pull --rebase
+gitx fetch --prune                  # 只更新远端引用 (不动工作区), 清理远端已删除的分支
 gitx sync                           # 先拉(变基)后推, 一步到位
 gitx sync "今天的改动"               # 带上提交信息
 ```
@@ -117,7 +128,6 @@ gitx init 我的项目     # 初始化: 分支 main + 中文友好配置
 gitx init 裸仓 --bare  # 原生 git init 参数照常透传 (--no-zh 可跳过中文配置)
 gitx info              # 仓库概览(表格): 状态/领先落后/最近提交/加速状态
 gitx graph -n 30       # 带图形的提交历史 (git log --graph 上色版)
-gitx branches -a       # 分支表: 上游 / 领先落后 / 最近提交 (单次 for-each-ref, 很快)
 gitx tidy              # 体检: 体积 / 已合并分支数
 gitx tidy --prune      # 删除已合并分支 (会确认, -y 跳过)
 gitx tidy --gc         # git gc 打包瘦身 (--aggressive 更彻底)
@@ -135,6 +145,69 @@ gitx config zh --global  # 全局写入
 
 中文友好配置解决两个老问题: `core.quotepath=false`(中文文件名不再显示为 `\344\270\255`)、
 `i18n.*Encoding=utf-8`(提交信息与日志按 UTF-8 处理)。
+
+### 分支
+
+```bash
+gitx branch                            # 分支表: 上游 / 领先落后 / 最近提交
+gitx branch -a                         # 含远端跟踪分支 (等价 gitx branches -a)
+gitx branch new 新功能                  # 从当前 HEAD 新建分支
+gitx branch new 修复 --from v0.6.1 -s   # 从标签/提交新建并立即切换 (-s)
+gitx switch 修复                        # 切换 (远端有同名分支时自动建立跟踪)
+gitx switch -c 实验                     # 新建并切换
+gitx switch -                           # 回到上一个分支
+gitx switch --detach 3f1a2b             # 切到某次提交 / 标签 (游离 HEAD)
+gitx branch rename 新名字                # 重命名当前分支
+gitx branch rename 新名字 -o 旧名字       # 重命名指定分支
+gitx branch delete 旧分支                # 删除已合并的本地分支 (未合并会提示)
+gitx branch delete 实验 --force          # 强制删除 (未合并也会先确认一次)
+gitx branch delete 旧分支 -r             # 删 origin 上的远端分支
+gitx branch upstream                    # 看当前分支的上游与领先/落后
+gitx branch upstream --set origin/main  # 关联上游
+gitx branch upstream --unset            # 取消上游关联
+gitx merge 新功能                        # 合并进当前分支 (冲突时给出继续/放弃提示)
+gitx merge --abort                      # 放弃正在进行的合并
+gitx rebase main                        # 变基到 main (冲突: --continue / --skip / --abort)
+gitx rebase -i main                     # 交互式变基 (压缩 / 改写 / 丢弃提交)
+```
+
+`gitx branch` 的一次性数据来自单次 `for-each-ref`(比逐个分支起进程快一个数量级);
+`gitx fetch` 走加速, `--prune` 会顺手清掉远端已删除的跟踪分支。
+
+### 提交与改动
+
+```bash
+gitx commit -m "修复登录超时"      # 提交已暂存的改动
+gitx commit -a -m "顺手改个错字"    # 提交所有已跟踪文件的改动
+gitx commit --amend --no-edit     # 修订上一次提交 (沿用原信息)
+gitx diff                         # 上色渲染的工作区改动 (rich.syntax 高亮)
+gitx diff --staged                # 暂存区 vs HEAD
+gitx diff --stat / --name-only    # 只看统计 / 只看文件名
+gitx discard 文件1 目录/ 文件2      # 丢弃工作区改动 (会确认, 不可恢复)
+gitx discard --staged 文件         # 只取消暂存, 保留文件内容
+gitx clean                        # 先预览未跟踪文件, 确认后删除
+gitx clean -d -y                  # 连未跟踪的目录一起删, 跳过确认
+gitx clean -x                     # 连 .gitignore 忽略的文件也删 (危险, 会确认)
+```
+
+### 暂存与标签
+
+```bash
+gitx stash                        # 列出暂存的改动 (stash@{N} / 时间 / 说明)
+gitx stash save "改到一半"          # 暂存当前改动 (工作区恢复干净; -u 连未跟踪文件)
+gitx stash show -p                # 看某条暂存的具体 diff (序号: gitx stash show 1 -p)
+gitx stash pop                    # 恢复并删除 (gitx stash pop 1 指定序号)
+gitx stash apply 1                # 恢复但保留该条暂存
+gitx stash drop 1                 # 删除一条 (会确认)
+gitx stash clear                  # 清空所有暂存 (会确认)
+
+gitx tag                          # 标签列表: 类型 / 时间 / 提交 / 说明
+gitx tag new v1.0.0 "首个正式版"    # 附注标签 (无说明 = 轻量标签)
+gitx tag push v1.0.0              # 推送指定标签 (推送直连, 镜像不支持推送)
+gitx tag push                     # 推送全部标签
+gitx tag delete v1.0.0            # 删本地标签
+gitx tag delete v1.0.0 -r         # 连 origin 上的标签一起删
+```
 
 ### 加速管理
 
@@ -163,6 +236,11 @@ gitx doctor                 # 环境自检(git/gh/token/仓库/加速源/编码)
 gitx status / gitx log --oneline   # git 子命令直接透传 (原生 init: gitx git init)
 gitx dowload ...            # 子命令笔误会给出形近提示
 ```
+
+透传规则: `branch` / `switch` / `merge` / `rebase` / `fetch` / `stash` / `tag` / `commit` /
+`diff` / `discard` / `clean` 现在都是 gitx 自己的命令 (有中文提示、确认与加速支持);
+其余词仍原样交给 git (`gitx status` / `gitx log --oneline` / `gitx blame ...`),
+需要未经改写的行为时用 `gitx git <任意命令>` 显式透传。
 
 环境变量 `GITX_PROXY=off|v6|gh-proxy|https://...` 可设置全局默认加速源。
 
@@ -198,10 +276,13 @@ gitx dowload ...            # 子命令笔误会给出形近提示
 src/gitx/
   __init__.py   入口: 快速分发先行, 需要时才加载 typer    dispatch.py   git 透传 / --version 快速通道 (仅标准库)
   console.py    rich 控制台 (进度条/questionary 交互选择)  config.py     持久化配置 (~/.config/gitx/config.json)
-  accel.py      加速源与测速                              gitcmd.py     git 命令封装 (分支/领先落后/维护原语)
+  accel.py      加速源与测速                              gitcmd.py     git 命令封装 (前置检查/分支/推送/维护原语)
   github.py     URL 解析 + REST API 客户端 (token 复用)   net.py        HTTP 下载: 断点续传 + 进度条
   download.py   仓库/文件夹/源码包下载                    release.py    Release 附件(API)
-  repo.py       init / info / undo / graph / branches / tidy / url
+  repo.py       init / info / commit / diff / discard / clean / undo / graph / tidy / url
+  branch.py     branch / switch / merge / rebase / fetch
+  stash.py      暂存 (save / list / pop / apply / drop / show / clear)
+  tag.py        标签 (list / new / delete / push)
   hub.py        search / stat / web / ignore
   sync.py       push / pull / sync
 ```
@@ -211,7 +292,14 @@ src/gitx/
 ```bash
 uv run python -m gitx --help
 uv run python -m gitx release cli/cli --list   # API + 加速 的实测例子
+uv build                                        # 构建 sdist + wheel (发布用)
 ```
+
+## 发布
+
+按 [RELEASE_TEMPLATE.md](./RELEASE_TEMPLATE.md) 执行: 版本号双改 (`pyproject.toml` + `__init__.py`),
+`uv build` 产出 `dist/gitx-X.Y.Z.tar.gz` 与 `dist/gitx-X.Y.Z-py3-none-any.whl`,
+打 tag 后用 `gh release create` **同时上传这两个附件** (源码包 + wheel), 上传后再下载验证 wheel 可安装。
 
 ## 许可
 

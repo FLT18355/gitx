@@ -1,13 +1,18 @@
-"""仓库级操作: 初始化 / 概览 / 撤销 / 提交图 / 分支 / 维护 / 远端地址.
+"""仓库级操作: 初始化 / 概览 / 撤销 / 提交图 / 维护 / 远端地址 / 日常提交与改动.
 
 对应命令:
   gitx init      分支 main + 中文友好配置 (core.quotepath=false 等)
   gitx info      状态、与远端领先/落后、最近提交、加速状态
   gitx undo      撤销最近 N 次提交 (soft/mixed/hard)
   gitx graph     提交历史 (git log --graph 上色版)
-  gitx branches  分支表: 上游 / 领先落后 / 最近提交
   gitx tidy      仓库体积 / 已合并分支 / 打包瘦身
   gitx url       查看或切换 origin 的地址形态 (accel / https / ssh)
+  gitx commit    提交改动 (--amend 修订上次提交)
+  gitx diff      查看改动 diff (上色渲染, --staged / --stat)
+  gitx discard   丢弃工作区(或暂存区)改动
+  gitx clean     删除未跟踪文件
+
+分支相关命令见 branch.py。
 """
 
 from __future__ import annotations
@@ -15,6 +20,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+from collections.abc import Sequence
 
 from rich.text import Text
 
@@ -70,8 +76,7 @@ def _brief_text(ref: str, path: str = ".") -> str:
 
 def info(path: str = ".") -> None:
     """gitx info [路径] —— 仓库概览."""
-    if not gitcmd.is_repo(path):
-        console.error(f"{path} 不是 git 仓库")
+    gitcmd.require_repo(path)
 
     _, root = gitcmd.capture(["git", "-C", path, "rev-parse", "--show-toplevel"])
     branch = gitcmd.current_branch(path) or "(尚无提交)"
@@ -117,10 +122,8 @@ def info(path: str = ".") -> None:
 
 def undo(times: int = 1, mode: str = "soft", path: str = ".", yes: bool = False) -> None:
     """撤销最近 times 个提交 (soft / mixed / hard)."""
-    if not gitcmd.is_repo(path):
-        console.error(f"{path} 不是 git 仓库")
-    if not gitcmd.has_commits(path):
-        console.error("仓库还没有提交, 无需撤销")
+    gitcmd.require_repo(path)
+    gitcmd.require_commits(path)
     total = gitcmd.commit_count(path)
     if times < 1 or times > total:
         console.error(f"撤销次数不合法: 仓库共 {total} 个提交, 无法撤销 {times} 个")
@@ -194,10 +197,8 @@ def _color_line(line: str) -> Text:
 
 def graph(limit: int = 15, all_refs: bool = False, path: str = ".") -> None:
     """gitx graph —— 带图形的提交历史 (git log --graph 上色版)."""
-    if not gitcmd.is_repo(path):
-        console.error(f"{path} 不是 git 仓库")
-    if not gitcmd.has_commits(path):
-        console.error("仓库还没有提交 (gitx push 一次就有历史了)")
+    gitcmd.require_repo(path)
+    gitcmd.require_commits(path)
     lines = gitcmd.graph_lines(limit, all_refs, path)
     if not lines:
         console.error("没有可显示的提交")
@@ -212,46 +213,12 @@ def graph(limit: int = 15, all_refs: bool = False, path: str = ".") -> None:
     console.info(f"更多: gitx graph -n 50 | gitx graph --all | gitx log --oneline (原生 git)")
 
 
-# ---------------------------------------------------------------- 分支 (gitx branches)
-
-def branches(path: str = ".", *, include_remote: bool = False, limit: int = 20) -> None:
-    """gitx branches —— 分支列表: 上游 / 领先落后 / 最近提交."""
-    if not gitcmd.is_repo(path):
-        console.error(f"{path} 不是 git 仓库")
-    rows = gitcmd.branches_info(path, include_remote)
-    if not rows:
-        console.error("还没有分支 (仓库没有提交)")
-    table = console.table("", "分支", "上游", "同步", "最近提交", "说明",
-                          title=f"分支 {len(rows)} 个" + (" (含远端跟踪)" if include_remote else ""))
-    for row in rows[:limit]:
-        if row["upstream"]:
-            if row["track"] == "[gone]":
-                sync = console.styled("[warn]上游已删除[/warn]")
-            elif row["ahead"] or row["behind"]:
-                sync = console.styled(f"[num]↑{row['ahead']} ↓{row['behind']}[/num]")
-            else:
-                sync = console.styled("[ok]一致[/ok]")
-        else:
-            sync = console.txt("未关联")
-        table.add_row(
-            console.styled("[ok]*[/ok]") if row["head"] else console.txt(""),
-            console.txt(row["name"]),
-            console.txt(row["upstream"] or "-"),
-            sync,
-            console.txt(f"{row['sha']} {row['date']}"),
-            console.txt(row["subject"][:40]),
-        )
-    console.print(table)
-    console.info("切换分支可用原生 git: gitx switch <分支>   |   清理已合并: gitx tidy --prune")
-
-
 # ---------------------------------------------------------------- 维护 (gitx tidy)
 
 def tidy(path: str = ".", *, prune: bool = False, run_gc: bool = False,
          aggressive: bool = False, yes: bool = False) -> None:
     """gitx tidy —— 仓库体检: 体积 / 已合并分支 / 打包瘦身."""
-    if not gitcmd.is_repo(path):
-        console.error(f"{path} 不是 git 仓库")
+    gitcmd.require_repo(path)
 
     size = gitcmd.repo_size(path)
     total = size["loose"] + size["pack"] + size["garbage"]
@@ -298,8 +265,7 @@ _TRANSPORTS = ("accel", "https", "ssh")
 
 def url(path: str = ".", transport: str = "", remote: str = "origin") -> None:
     """gitx url —— 查看/切换 origin 的地址形态: accel(加速) / https(直连) / ssh."""
-    if not gitcmd.is_repo(path):
-        console.error(f"{path} 不是 git 仓库")
+    gitcmd.require_repo(path)
     names = gitcmd.remote_names(path)
     if not names:
         console.error("没有配置远程仓库 (gitx push to <仓库地址> 关联)")
@@ -345,3 +311,130 @@ def _transport_label(fetch: str, push: str) -> str:
     if fetch.startswith("https://github.com/"):
         return "[ok]https 直连[/ok]"
     return f"[num]加速[/num] {push.startswith('git@') and '(推送走 ssh)' or ''}".strip()
+
+
+# ---------------------------------------------------------------- 提交 (gitx commit)
+
+def commit(message: str = "", *, all_changes: bool = False, amend: bool = False,
+           no_edit: bool = False, allow_empty: bool = False, path: str = ".") -> None:
+    """gitx commit —— 提交改动 (gitx commit -m '信息' [--all] [--amend])."""
+    gitcmd.require_repo(path)
+    # 未 amend 时必须有提交信息; amend 可以不带 -m (走编辑器改, 或 --no-edit 沿用原信息)
+    if not message and not amend:
+        console.error("用法: gitx commit -m '提交信息' [--all] [--amend]")
+    staged, _modified, _untracked, _conflicts = gitcmd.status_counts(path)
+    if not amend and not allow_empty and not all_changes and staged == 0:
+        console.info("没有已暂存的改动 (先 git add <文件>, 或用 -a 提交已跟踪文件的改动)")
+        return
+
+    args = ["git", "-C", path, "commit"]
+    if all_changes:
+        args.append("-a")
+    if amend:
+        args.append("--amend")
+    if no_edit:
+        args.append("--no-edit")
+    if allow_empty:
+        args.append("--allow-empty")
+    if message:
+        args += ["-m", message]
+
+    if amend and not message and not no_edit:
+        # 未给信息的修订要打开编辑器: 继承终端, 不捕获输出
+        if subprocess.run(args).returncode != 0:
+            console.error("提交失败")
+    else:
+        rc, out = gitcmd.run_capture(args)
+        if rc != 0:
+            console.error(out or "提交失败")
+
+    console.done(f"已提交: {message or '修订上次提交'}")
+    console.info(f"现在 HEAD: {_brief_text('HEAD', path)}")
+
+
+# ---------------------------------------------------------------- 查看改动 (gitx diff)
+
+def diff(paths: Sequence[str] = (), *, staged: bool = False, stat: bool = False,
+         name_only: bool = False, path: str = ".") -> None:
+    """gitx diff [路径...] —— 查看改动 (--staged / --stat / --name-only)."""
+    gitcmd.require_repo(path)
+    args = ["git", "-C", path, "diff", "--no-ext-diff", "--color=never"]
+    if staged:
+        args.append("--cached")
+    if stat:
+        args.append("--stat")
+    if name_only:
+        args.append("--name-only")
+    if paths:
+        args.append("--")
+        args += list(paths)
+
+    rc, out = gitcmd.run_capture(args)
+    if rc != 0:
+        console.error(out or "git diff 失败")
+    if not out:
+        console.info("暂存区与 HEAD 没有差异" if staged else "工作区没有未暂存的改动")
+        return
+    if stat or name_only:
+        console.print(console.txt(out))  # 原样输出, 不做 markup 解析
+        return
+    from rich.syntax import Syntax  # 延迟导入: 只有渲染 diff 时才需要
+    console.print(Syntax(out, "diff", line_numbers=False, word_wrap=False))
+
+
+# ---------------------------------------------------------------- 丢弃改动 (gitx discard)
+
+def discard(paths: Sequence[str], *, staged: bool = False, yes: bool = False,
+            path: str = ".") -> None:
+    """gitx discard <路径...> —— 丢弃工作区 (或 --staged 暂存区) 改动."""
+    gitcmd.require_repo(path)
+    if not paths:
+        console.error("用法: gitx discard <路径...> [--staged] [-y]")
+    if not staged and not yes:
+        if not console.ask(f"将丢弃 {len(paths)} 个路径的未提交改动 (无法恢复), 继续?",
+                           default=False):
+            console.error("已取消")
+
+    args = ["git", "-C", path, "restore"]
+    if staged:
+        args.append("--staged")
+    args.append("--")
+    args += list(paths)
+
+    rc, out = gitcmd.run_capture(args)
+    if rc != 0:
+        console.error(out or "丢弃失败")
+    console.done(f"已丢弃 {len(paths)} 个路径的{'暂存改动' if staged else '改动'}")
+
+
+# ---------------------------------------------------------------- 清理未跟踪文件 (gitx clean)
+
+def clean(*, directories: bool = False, ignored: bool = False, yes: bool = False,
+          path: str = ".") -> None:
+    """gitx clean —— 删除未跟踪文件 (--directories 连目录 / --ignored 含忽略项 / --yes 免确认)."""
+    gitcmd.require_repo(path)
+    flags: list[str] = []
+    if directories:
+        flags.append("-d")
+    if ignored:
+        flags.append("-x")
+
+    rc, preview = gitcmd.run_capture(["git", "-C", path, "clean", "-n", *flags])
+    if rc != 0:
+        console.error(preview or "git clean 失败")
+    if not preview:
+        console.info("没有可清理的未跟踪文件")
+        return
+    console.print(console.txt(preview))  # 原样打印预览
+
+    if not yes:
+        question = "确认删除以上未跟踪文件?"
+        if ignored:
+            question = "-x 会连同被 .gitignore 忽略的文件一起删除, 确认删除?"
+        if not console.ask(question, default=False):
+            console.error("已取消")
+
+    rc, out = gitcmd.run_capture(["git", "-C", path, "clean", "-f", *flags])
+    if rc != 0:
+        console.error(out or "清理失败")
+    console.done("已清理未跟踪文件")

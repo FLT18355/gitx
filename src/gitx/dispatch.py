@@ -5,10 +5,13 @@
 
     gitx status / gitx log --oneline / gitx git <任意 git 命令>   -> 直接 exec git
     gitx -V / --version                                        -> 直接打印版本
+    gitx 自己的子命令 (含 branch / switch / stash / tag 等)       -> 交给 cli.py
     其余 (typer 子命令 / GitHub 链接)                            -> 交给 cli.py
 
 判定"这是不是 git 命令"不再需要 `git help -a` (一次子进程 ~0.2 秒, 且输出随语言
 变化): 不是 gitx 自己的子命令、也不像链接的词, 直接原样交给 git, 由 git 自己报错。
+笔误提示只在 git 自己判定"不是 git 命令" (退出码 1) 时补一句, 因此 `gitx log` /
+`gitx status` 这类真实 git 命令不会被提示抢走, 也不会多花一次探测的子进程。
 """
 
 from __future__ import annotations
@@ -21,8 +24,10 @@ from . import __version__
 # gitx 自身的子命令; 其余词一律视为 git 透传 (含用户的 git alias)
 SUBCOMMANDS = frozenset({
     "download", "clone", "release",
-    "push", "pull", "sync",
+    "push", "pull", "sync", "fetch",
     "init", "info", "undo", "graph", "lg", "branches", "tidy", "url",
+    "branch", "switch", "merge", "rebase",
+    "stash", "tag", "commit", "diff", "discard", "clean",
     "search", "stat", "web", "ignore",
     "proxy", "config", "doctor", "git",
 })
@@ -66,8 +71,12 @@ def handle(argv: list[str]) -> tuple[int | None, list[str]]:
     if is_download(first):
         # GitHub 链接直接下载: 交给 typer 的 download 命令 (选项原样保留)
         return None, ["download", *argv]
-    close = _close_subcommand(first)  # 笔误提示: gitx dowload https://...
-    if close:
-        print(f"gitx: 没有子命令 {first} (是想用 {close} 吗? 自身命令见 gitx -h)", file=sys.stderr)
-        return 2, argv
-    return _run_git(argv), argv
+    # 不是 gitx 子命令 -> 原样交给 git, 由 git 自己解析 (log / status / alias / 报错)
+    code = _run_git(argv)
+    if code == 1:
+        # git 判定"不是 git 命令"时退出码是 1 (仓库/参数错误是 128/129), 这时才补一句笔误提示
+        close = _close_subcommand(first)
+        if close:
+            print(f"gitx: 若想用 gitx 的自有命令, 是想用 {close} 吗? (全部命令见 gitx -h)",
+                  file=sys.stderr)
+    return code, argv

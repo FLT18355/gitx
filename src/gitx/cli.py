@@ -1,9 +1,10 @@
 """gitx 命令行入口: 用 Typer + Rich 构建的分组式 CLI.
 
 命令分组:
-  下载 (download / clone / release)   同步 (push / pull / sync)
-  仓库 (init / info / undo / graph / branches / tidy / url)
-  探索 (search / web / ignore)        加速 (proxy ...)   配置 (config ... / doctor)
+  下载 (download / clone / release)   同步 (push / pull / sync / fetch)
+  仓库 (init / info / commit / diff / discard / clean / undo / graph / tidy / url)
+  分支 (branch / switch / merge / rebase)  暂存 (stash)  标签 (tag)
+  探索 (search / stat / web / ignore)      加速 (proxy ...)  配置 (config ... / doctor)
 非 gitx 自己的词一律透传 git (gitx status / gitx log --oneline), 这条快速通道
 由 dispatch.py 在导入 typer 之前处理, 因此几乎瞬时完成。
 """
@@ -17,11 +18,14 @@ from typing import Annotated, Optional
 
 import typer
 
-from . import __version__, accel, config, console, download, gitcmd, github, hub, release, repo, sync
+from . import (__version__, accel, branch, config, console, download, gitcmd, github, hub,
+               release, repo, stash, sync, tag)
 
 PANEL_DL = "下载 (默认加速)"
 PANEL_SYNC = "同步"
-PANEL_REPO = "仓库"
+PANEL_REPO = "仓库 (提交 / 改动 / 历史)"
+PANEL_BRANCH = "分支 (切换 / 合并 / 变基)"
+PANEL_WIP = "暂存与标签"
 PANEL_HUB = "探索 (搜索 / 网页 / 模板)"
 PANEL_PROXY = "加速管理"
 PANEL_CONF = "配置与自检"
@@ -43,6 +47,12 @@ _EPILOG = """[key]示例[/key]
   gitx search "cli 工具" --language go -d           搜仓库并下载第 1 个
   gitx stat cli/cli                                 看仓库概览 (★ star / topics / 语言 / 贡献者)
   gitx graph -n 30                                  带图形的提交历史
+  gitx switch -c 新功能                              新建分支并切换
+  gitx branch                                       看分支表 (上游 / 领先落后)
+  gitx merge main                                   把 main 合并进来
+  gitx stash save "改到一半"                          暂存当前改动
+  gitx tag new v1.0.0 "首个正式版" && gitx tag push   打标签并推送
+  gitx diff --staged                                看上色后的暂存区改动
   gitx tidy --gc                                    仓库体检 + 打包瘦身
   gitx url accel                                    让 origin 拉取走加速
   gitx proxy auto                                   自动测速并选用最快加速源
@@ -236,14 +246,14 @@ app.command("lg", hidden=True, rich_help_panel=PANEL_REPO,
             help="graph 的别名")(graph_cmd)
 
 
-@app.command(rich_help_panel=PANEL_REPO)
+@app.command(rich_help_panel=PANEL_BRANCH)
 def branches(
     path: Annotated[str, typer.Argument(metavar="路径", help="仓库路径")] = ".",
     include_remote: Annotated[bool, typer.Option("--all", "-a", help="含远端跟踪分支")] = False,
     limit: Annotated[int, typer.Option("--limit", "-n", help="最多显示多少个分支")] = 20,
 ) -> None:
-    """分支列表: 上游 / 领先落后 / 最近提交."""
-    repo.branches(path, include_remote=include_remote, limit=limit)
+    """分支列表: 上游 / 领先落后 / 最近提交 (等价 gitx branch)."""
+    branch.list_branches(path, include_remote=include_remote, limit=limit)
 
 
 @app.command(rich_help_panel=PANEL_REPO)
@@ -267,6 +277,315 @@ def url(
 ) -> None:
     """查看或切换远端地址: accel (拉取加速, 推送直连) / https / ssh."""
     repo.url(path, transport or "", remote)
+
+
+# ================================================================ 分支 (gitx branch / switch / merge / rebase / fetch)
+
+branch_app = typer.Typer(help="分支: 列表 / 新建 / 重命名 / 删除 / 上游", rich_markup_mode="rich",
+                         invoke_without_command=True, context_settings={"help_option_names": ["-h", "--help"]})
+
+
+@branch_app.callback()
+def _branch_root(
+    ctx: typer.Context,
+    include_remote: Annotated[bool, typer.Option("--all", "-a", help="含远端跟踪分支")] = False,
+    limit: Annotated[int, typer.Option("--limit", "-n", help="最多显示多少个分支")] = 20,
+) -> None:
+    # 不带子命令 = 列表
+    if ctx.invoked_subcommand is None:
+        branch.list_branches(".", include_remote=include_remote, limit=limit)
+
+
+@branch_app.command("new")
+def branch_new(
+    name: Annotated[str, typer.Argument(metavar="分支名", help="新分支名")],
+    start: Annotated[str, typer.Option("--from", "-b", help="起点 (分支 / 标签 / 提交), 默认 HEAD")] = "",
+    switch: Annotated[bool, typer.Option("--switch", "-s", help="建完立即切换过去")] = False,
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """新建分支."""
+    branch.create(name, start=start, switch=switch, path=path)
+
+
+@branch_app.command("rename")
+def branch_rename(
+    new: Annotated[str, typer.Argument(metavar="新名字", help="新分支名")],
+    old: Annotated[str, typer.Option("--from", "-o", help="旧分支名, 缺省为当前分支")] = "",
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """重命名分支 (缺省改当前分支)."""
+    branch.rename(old, new, path=path)
+
+
+@branch_app.command("delete")
+def branch_delete(
+    names: Annotated[list[str], typer.Argument(metavar="分支...", help="要删除的分支名")],
+    force: Annotated[bool, typer.Option("--force", "-D", help="强制删除未合并的分支")] = False,
+    remote: Annotated[bool, typer.Option("--remote", "-r", help="删除 origin 上的远端分支")] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="跳过确认")] = False,
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """删除本地或远端分支."""
+    branch.delete(list(names), force=force, remote=remote, yes=yes, path=path)
+
+
+@branch_app.command("upstream")
+def branch_upstream(
+    name: Annotated[Optional[str], typer.Argument(metavar="[分支]", help="缺省为当前分支")] = None,
+    set_to: Annotated[str, typer.Option("--set", help="设置上游, 如 origin/main")] = "",
+    unset: Annotated[bool, typer.Option("--unset", help="取消上游关联")] = False,
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """查看 / 设置 / 取消上游分支."""
+    branch.upstream(name or "", set_to=set_to, unset=unset, path=path)
+
+
+app.add_typer(branch_app, name="branch", rich_help_panel=PANEL_BRANCH)
+
+
+@app.command(rich_help_panel=PANEL_BRANCH)
+def switch(
+    name: Annotated[str, typer.Argument(metavar="分支", help="分支名; - 表示上一个分支")],
+    create: Annotated[bool, typer.Option("--create", "-c", help="新建并切换")] = False,
+    force: Annotated[bool, typer.Option("--force", "-f", help="有未提交改动也强制切换")] = False,
+    detach: Annotated[bool, typer.Option("--detach", help="切到某次提交 (游离 HEAD)")] = False,
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """切换分支 (新建: gitx switch -c <分支>)."""
+    branch.do_switch(name, create=create, force=force, detach=detach, path=path)
+
+
+@app.command(rich_help_panel=PANEL_BRANCH)
+def merge(
+    name: Annotated[Optional[str], typer.Argument(metavar="[分支]", help="要合并进来的分支")] = None,
+    no_ff: Annotated[bool, typer.Option("--no-ff", help="总是生成合并提交")] = False,
+    squash: Annotated[bool, typer.Option("--squash", help="只把改动放进暂存区, 不提交")] = False,
+    abort: Annotated[bool, typer.Option("--abort", help="放弃正在进行的合并")] = False,
+    continue_: Annotated[bool, typer.Option("--continue", help="冲突解决后完成合并")] = False,
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """把某个分支合并进当前分支 (冲突时给出解决/放弃提示)."""
+    branch.merge(name or "", no_ff=no_ff, squash=squash, abort=abort, continue_=continue_, path=path)
+
+
+@app.command(rich_help_panel=PANEL_BRANCH)
+def rebase(
+    onto: Annotated[Optional[str], typer.Argument(metavar="[目标]", help="变基目标 (分支 / 标签)")] = None,
+    interactive: Annotated[bool, typer.Option("--interactive", "-i", help="交互式变基 (可压缩/改写提交)")] = False,
+    abort: Annotated[bool, typer.Option("--abort", help="放弃正在进行的变基")] = False,
+    continue_: Annotated[bool, typer.Option("--continue", help="冲突解决后继续变基")] = False,
+    skip: Annotated[bool, typer.Option("--skip", help="跳过当前这次提交")] = False,
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """把当前分支变基到目标 (冲突时给出继续/跳过/放弃提示)."""
+    branch.rebase(onto or "", interactive=interactive, abort=abort, continue_=continue_, skip=skip, path=path)
+
+
+@app.command(rich_help_panel=PANEL_SYNC)
+def fetch(
+    prune: Annotated[bool, typer.Option("--prune", "-p", help="清理远端已删除的分支")] = False,
+    all_remotes: Annotated[bool, typer.Option("--all", "-a", help="所有远程")] = False,
+    tags: Annotated[bool, typer.Option("--tags", help="同时拉取标签")] = False,
+    no_proxy: Annotated[bool, typer.Option("--no-proxy", help="本次直连")] = False,
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """更新远端跟踪引用 (走加速), 让 gitx branch 的领先/落后更准."""
+    branch.fetch(path, prune=prune, all_remotes=all_remotes, tags=tags, no_proxy=no_proxy)
+
+
+# ================================================================ 暂存与标签 (gitx stash / tag)
+
+stash_app = typer.Typer(help="暂存: 保存 / 查看 / 恢复 / 删除", rich_markup_mode="rich",
+                        invoke_without_command=True, context_settings={"help_option_names": ["-h", "--help"]})
+
+
+@stash_app.callback()
+def _stash_root(
+    ctx: typer.Context,
+    limit: Annotated[int, typer.Option("--limit", "-n", help="最多显示多少条")] = 20,
+) -> None:
+    # 不带子命令 = 列表
+    if ctx.invoked_subcommand is None:
+        stash.list_stashes(".", limit=limit)
+
+
+@stash_app.command("list")
+def stash_list(
+    limit: Annotated[int, typer.Option("--limit", "-n", help="最多显示多少条")] = 20,
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """列出暂存内容."""
+    stash.list_stashes(path, limit=limit)
+
+
+@stash_app.command("save")
+def stash_save(
+    words: Annotated[Optional[list[str]], typer.Argument(metavar="[备注]", help="暂存备注")] = None,
+    include_untracked: Annotated[bool, typer.Option("--include-untracked", "-u", help="连同未跟踪文件一起暂存")] = False,
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """保存当前改动 (工作区恢复干净)."""
+    stash.save(" ".join(words or []), include_untracked=include_untracked, path=path)
+
+
+@stash_app.command("pop")
+def stash_pop(
+    index: Annotated[int, typer.Argument(metavar="序号", help="stash@{N} 的 N, 默认 0")] = 0,
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """恢复并删除该条暂存."""
+    stash.pop(index, path=path)
+
+
+@stash_app.command("apply")
+def stash_apply(
+    index: Annotated[int, typer.Argument(metavar="序号", help="stash@{N} 的 N, 默认 0")] = 0,
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """恢复但保留该条暂存."""
+    stash.apply(index, path=path)
+
+
+@stash_app.command("drop")
+def stash_drop(
+    index: Annotated[int, typer.Argument(metavar="序号", help="stash@{N} 的 N, 默认 0")] = 0,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="跳过确认")] = False,
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """删除一条暂存."""
+    stash.drop(index, yes=yes, path=path)
+
+
+@stash_app.command("show")
+def stash_show(
+    index: Annotated[int, typer.Argument(metavar="序号", help="stash@{N} 的 N, 默认 0")] = 0,
+    patch: Annotated[bool, typer.Option("--patch", "-p", help="显示完整 diff")] = False,
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """查看某条暂存的改动 (默认只看统计)."""
+    stash.show(index, patch=patch, path=path)
+
+
+@stash_app.command("clear")
+def stash_clear(
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="跳过确认")] = False,
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """清空所有暂存."""
+    stash.clear(yes=yes, path=path)
+
+
+app.add_typer(stash_app, name="stash", rich_help_panel=PANEL_WIP)
+
+
+tag_app = typer.Typer(help="标签: 列表 / 新建 / 删除 / 推送", rich_markup_mode="rich",
+                      invoke_without_command=True, context_settings={"help_option_names": ["-h", "--help"]})
+
+
+@tag_app.callback()
+def _tag_root(
+    ctx: typer.Context,
+    pattern: Annotated[str, typer.Option("--pattern", "-p", help="只显示匹配的标签")] = "",
+    limit: Annotated[int, typer.Option("--limit", "-n", help="最多显示多少个")] = 30,
+) -> None:
+    # 不带子命令 = 列表
+    if ctx.invoked_subcommand is None:
+        tag.list_tags(".", pattern=pattern, limit=limit)
+
+
+@tag_app.command("list")
+def tag_list(
+    pattern: Annotated[str, typer.Option("--pattern", "-p", help="只显示匹配的标签")] = "",
+    limit: Annotated[int, typer.Option("--limit", "-n", help="最多显示多少个")] = 30,
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """列出标签."""
+    tag.list_tags(path, pattern=pattern, limit=limit)
+
+
+@tag_app.command("new")
+def tag_new(
+    name: Annotated[str, typer.Argument(metavar="标签名", help="如 v1.0.0")],
+    words: Annotated[Optional[list[str]], typer.Argument(metavar="[说明]", help="标签说明")] = None,
+    annotate: Annotated[bool, typer.Option("--annotate", "-a", help="强制附注标签 (无说明时)")] = False,
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """新建标签 (带说明即为附注标签)."""
+    tag.create(name, " ".join(words or []), annotated=annotate, path=path)
+
+
+@tag_app.command("delete")
+def tag_delete(
+    names: Annotated[list[str], typer.Argument(metavar="标签...", help="要删除的标签")],
+    remote: Annotated[bool, typer.Option("--remote", "-r", help="同时删除 origin 上的标签")] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="跳过确认")] = False,
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """删除标签."""
+    tag.delete(list(names), remote=remote, yes=yes, path=path)
+
+
+@tag_app.command("push")
+def tag_push(
+    names: Annotated[Optional[list[str]], typer.Argument(metavar="[标签...]", help="缺省推送全部标签")] = None,
+    remote: Annotated[str, typer.Option("--remote", "-r", help="远程名")] = "origin",
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """推送标签到远端 (推送直连)."""
+    tag.push(list(names or ()), remote=remote, path=path)
+
+
+app.add_typer(tag_app, name="tag", rich_help_panel=PANEL_WIP)
+
+
+# ================================================================ 提交与改动 (gitx commit / diff / discard / clean)
+
+@app.command(rich_help_panel=PANEL_REPO)
+def commit(
+    message: Annotated[str, typer.Option("--message", "-m", help="提交信息")] = "",
+    all_changes: Annotated[bool, typer.Option("--all", "-a", help="提交所有已跟踪文件的改动")] = False,
+    amend: Annotated[bool, typer.Option("--amend", help="修订上一次提交")] = False,
+    no_edit: Annotated[bool, typer.Option("--no-edit", help="修订时沿用原提交信息")] = False,
+    allow_empty: Annotated[bool, typer.Option("--allow-empty", help="允许空提交")] = False,
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """提交改动 (gitx commit -m "信息"; 修订: --amend)."""
+    repo.commit(message, all_changes=all_changes, amend=amend, no_edit=no_edit,
+                allow_empty=allow_empty, path=path)
+
+
+@app.command(rich_help_panel=PANEL_REPO)
+def diff(
+    paths: Annotated[Optional[list[str]], typer.Argument(metavar="[路径...]", help="只看这些路径")] = None,
+    staged: Annotated[bool, typer.Option("--staged", "-s", help="看暂存区与 HEAD 的差异")] = False,
+    stat: Annotated[bool, typer.Option("--stat", help="只看统计")] = False,
+    name_only: Annotated[bool, typer.Option("--name-only", help="只列文件名")] = False,
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """看上色后的改动 diff (默认工作区; --staged 看暂存区)."""
+    repo.diff(list(paths or ()), staged=staged, stat=stat, name_only=name_only, path=path)
+
+
+@app.command(rich_help_panel=PANEL_REPO)
+def discard(
+    paths: Annotated[list[str], typer.Argument(metavar="路径...", help="要丢弃改动的文件 / 目录")],
+    staged: Annotated[bool, typer.Option("--staged", "-s", help="只取消暂存, 保留文件改动")] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="跳过确认")] = False,
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """丢弃工作区改动 (git restore; 不可恢复, 会确认)."""
+    repo.discard(list(paths), staged=staged, yes=yes, path=path)
+
+
+@app.command(rich_help_panel=PANEL_REPO)
+def clean(
+    directories: Annotated[bool, typer.Option("--directories", "-d", help="连未跟踪的目录一起删")] = False,
+    ignored: Annotated[bool, typer.Option("--ignored", "-x", help="连 .gitignore 忽略的文件一起删 (危险)")] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="跳过确认")] = False,
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """删除未跟踪的文件 (先预览再确认, 默认只删文件)."""
+    repo.clean(directories=directories, ignored=ignored, yes=yes, path=path)
 
 
 # ================================================================ 探索

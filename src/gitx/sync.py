@@ -6,8 +6,7 @@ from . import accel, config, console, gitcmd, github
 
 
 def do_pull(path: str = ".", rebase: bool = False, no_proxy: bool = False) -> None:
-    if not gitcmd.is_repo(path):
-        console.error(f"{path} 不是 git 仓库")
+    gitcmd.require_repo(path)
     if not gitcmd.remote_url("origin", path):
         console.error("没有远程仓库, 用: gitx push to <仓库地址> 先关联")
     prefix = config.active_proxy(no_proxy=no_proxy)

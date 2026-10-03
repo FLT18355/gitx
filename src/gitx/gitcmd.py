@@ -48,8 +48,37 @@ def capture(args: Sequence[str]) -> tuple[int, str]:
     return r.returncode, (r.stdout or "").strip()
 
 
+def ok(args: Sequence[str]) -> bool:
+    """跑一条命令, 只关心成败 (输出丢弃); 命令不存在时视为失败."""
+    try:
+        return subprocess.run([str(a) for a in args], capture_output=True).returncode == 0
+    except FileNotFoundError:
+        return False
+
+
+def run_capture(args: Sequence[str]) -> tuple[int, str]:
+    """跑命令并返回 (退出码, 输出); stderr 优先 —— git 的说明都写在 stderr."""
+    try:
+        r = subprocess.run([str(a) for a in args], capture_output=True, text=True)
+    except FileNotFoundError:
+        return 127, "未找到命令"
+    return r.returncode, (r.stderr or "").strip() or (r.stdout or "").strip()
+
+
 def is_repo(path: str = ".") -> bool:
     return capture(["git", "-C", path, "rev-parse", "--is-inside-work-tree"])[0] == 0
+
+
+def require_repo(path: str = ".") -> None:
+    """不在仓库里就直接报错退出 (各命令的统一前置检查)."""
+    if not is_repo(path):
+        console.error(f"{path} 不是 git 仓库")
+
+
+def require_commits(path: str = ".") -> None:
+    require_repo(path)
+    if not has_commits(path):
+        console.error("仓库还没有提交 (gitx push 一次就有历史了)")
 
 
 def current_branch(path: str = ".") -> str:
@@ -149,13 +178,24 @@ def status_counts(path: str = ".") -> tuple[int, int, int, int]:
 
 
 def fetch(path: str = ".", remote: str = "origin") -> bool:
-    """更新远端跟踪引用 (用于判断领先/落后)."""
-    return subprocess.run(["git", "-C", path, "fetch", "--quiet", remote],
-                          capture_output=True).returncode == 0
+    """更新远端跟踪引用 (用于判断领先/落后, 直连)."""
+    return fetch_remote(path, remote)
 
 
 def has_upstream(path: str = ".") -> bool:
     return capture(["git", "-C", path, "rev-parse", "--abbrev-ref", "@{upstream}"])[0] == 0
+
+
+def upstream_of(ref: str = "HEAD", path: str = ".") -> str:
+    """分支的上游全名 (如 origin/main); 未关联返回空串."""
+    rc, out = capture(["git", "-C", path, "rev-parse", "--abbrev-ref",
+                       "--symbolic-full-name", f"{ref}@{{upstream}}"])
+    return out if rc == 0 else ""
+
+
+def local_branch_exists(name: str, path: str = ".") -> bool:
+    return capture(["git", "-C", path, "show-ref", "--verify", "--quiet",
+                    f"refs/heads/{name}"])[0] == 0
 
 
 def remote_branch_exists(remote: str, branch: str, path: str = ".") -> bool:
@@ -170,9 +210,10 @@ def set_upstream(remote: str, branch: str, path: str = ".") -> bool:
     ).returncode == 0
 
 
-def behind_ahead(path: str = ".") -> tuple[int, int]:
-    """相对上游的 (落后, 领先); 无上游返回 (-1, -1)."""
-    rc, out = capture(["git", "-C", path, "rev-list", "--left-right", "--count", "@{upstream}...HEAD"])
+def diverge(upstream: str, ref: str = "HEAD", path: str = ".") -> tuple[int, int]:
+    """(落后 upstream, 领先 ref) 的提交数; 取不到时返回 (-1, -1)."""
+    rc, out = capture(["git", "-C", path, "rev-list", "--left-right", "--count",
+                       f"{upstream}...{ref}"])
     if rc != 0:
         return -1, -1
     parts = out.replace("\t", " ").split()
@@ -182,6 +223,11 @@ def behind_ahead(path: str = ".") -> tuple[int, int]:
         return int(parts[0]), int(parts[1])
     except ValueError:
         return -1, -1
+
+
+def behind_ahead(path: str = ".") -> tuple[int, int]:
+    """相对上游的 (落后, 领先); 无上游返回 (-1, -1)."""
+    return diverge("@{upstream}", "HEAD", path)
 
 
 def reset(path: str, mode: str, target: str) -> bool:
@@ -274,13 +320,57 @@ def push(path: str = ".", remote: str = "origin", branch: str = "", force: bool 
     return subprocess.run(args).returncode == 0
 
 
+def proxy_args(prefix: str | None) -> list[str]:
+    """用 -c 临时覆盖 insteadOf, 让本条 git 命令走加速(不改远程 URL)."""
+    if not prefix:
+        return []
+    args: list[str] = []
+    for target in accel.TARGETS:
+        args += ["-c", f"url.{prefix}/{target}.insteadOf={target}"]
+    return args
+
+
+def fetch_remote(path: str = ".", remote: str = "origin", *, prefix: str | None = None,
+                 prune: bool = False, all_remotes: bool = False, tags: bool = False) -> bool:
+    """更新远端跟踪引用; prefix 非空时走加速. all_remotes 时忽略 remote 参数."""
+    args = ["git", "-C", path, *proxy_args(prefix), "fetch"]
+    if all_remotes:
+        args.append("--all")
+    else:
+        args.append(remote)
+    if prune:
+        args.append("--prune")
+    if tags:
+        args.append("--tags")
+    return subprocess.run(args, capture_output=True).returncode == 0
+
+
+def refspec_push(path: str, remote: str, refs: Sequence[str] = (), *,
+                 delete_refs: Sequence[str] = (), tags_all: bool = False,
+                 force: bool = False) -> tuple[int, str]:
+    """推送任意引用 (标签 / 分支); 复用"推送直连"的 insteadOf 覆盖.
+
+    delete_refs 里的名字会以 :refs/tags/<name> 形式删除远端标签。
+    返回 (退出码, 输出), 由调用方决定如何提示。
+    """
+    args = ["git", "-C", path]
+    override = _push_override(path, remote)
+    if override:
+        args += ["-c", override]
+    args.append("push")
+    if force:
+        args.append("--force")
+    if tags_all:
+        args.append("--tags")
+    args.append(remote)
+    args += [str(ref) for ref in refs]
+    args += [f":refs/tags/{ref}" for ref in delete_refs]
+    return run_capture(args)
+
+
 def pull(path: str = ".", rebase: bool = False, prefix: str | None = None) -> bool:
     """拉取; prefix 非空时用 -c 临时覆盖 insteadOf 走加速(不改远程 URL)."""
-    args = ["git", "-C", path]
-    if prefix:
-        for target in accel.TARGETS:
-            args += ["-c", f"url.{prefix}/{target}.insteadOf={target}"]
-    args.append("pull")
+    args = ["git", "-C", path, *proxy_args(prefix), "pull"]
     if rebase:
         args.append("--rebase")
     return subprocess.run(args).returncode == 0

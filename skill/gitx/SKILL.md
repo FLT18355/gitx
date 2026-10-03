@@ -1,3 +1,13 @@
+---
+name: gitx
+version: 1.0.0
+description: 给中国人用的 GitHub 加速与同步工具 —— 下载 / 同步 / 加速 / 分支 / 暂存 / 标签 / 提交 / 改动
+author: FLT18355
+repository: https://github.com/FLT18355/gitx
+license: MIT
+tags: [github, git, cli, download, sync, acceleration]
+---
+
 # gitx Skill
 
 给中国人用的 GitHub 加速与同步工具 —— 下载 / 同步 / 加速 / 分支 / 暂存 / 标签 / 提交 / 改动，一条命令搞定。

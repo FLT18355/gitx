@@ -3,6 +3,8 @@ name = "gitx"
 version = "0.6.1"
 description = "给中国人用的 GitHub 加速下载与同步工具"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
 { name = "FLT18355", email = "cm18750724707a@outlook.com" }
 ]

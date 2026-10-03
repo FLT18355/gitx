@@ -212,3 +212,7 @@ src/gitx/
 uv run python -m gitx --help
 uv run python -m gitx release cli/cli --list   # API + 加速 的实测例子
 ```
+
+## 许可
+
+本项目以 [MIT 许可](./LICENSE) 开源, 版权归 `FLT18355` (2026)。

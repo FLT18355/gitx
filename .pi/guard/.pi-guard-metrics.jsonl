@@ -1,0 +1,3 @@
+{"kind":"bash_guard","toolName":"bash","outcome":"prompt_allow","severity":"high","reasons":"shell output redirection (can overwrite files); pipe operator (chained commands); git remote (git command); curl/wget piped (possible remote code execution)","ts":1790942824674}
+{"kind":"enrich","matched":false,"toolName":"bash","ts":1790942833676}
+{"kind":"enrich","matched":false,"toolName":"bash","ts":1790942917684}

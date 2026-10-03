@@ -56,8 +56,10 @@ _EPILOG = """[key]示例[/key]
   gitx tidy --gc                                    仓库体检 + 打包瘦身
   gitx url accel                                    让 origin 拉取走加速
   gitx proxy auto                                   自动测速并选用最快加速源
+  gitx proxy release on gh-proxy                    只给 Release 换加速源 (与其它功能分开)
 
-环境变量 [num]GITX_PROXY[/num] = off | v6 | gh-proxy | https://... 可设置全局默认加速源。"""
+环境变量 [num]GITX_PROXY[/num] = off | v6 | gh-proxy | https://... 可设置全局默认加速源,
+[num]GITX_RELEASE_PROXY[/num] 单独覆盖 Release 功能的加速源。"""
 
 app = typer.Typer(
     name="gitx",
@@ -102,7 +104,7 @@ def download_cmd(
     limit: Annotated[int, typer.Option("--limit", "-n", help="发布列表条数 (发布页链接挑选发布用, 最多 100)")] = release.DEFAULT_LIMIT,
     assets: Annotated[Optional[list[str]], typer.Option("--asset", "-a", help="仅下载匹配的附件, 可重复")] = None,
     source: Annotated[bool, typer.Option("--source", help="额外下载源码包 (发布页链接)")] = False,
-    proxy: Annotated[Optional[str], typer.Option("--proxy", help="本次使用的加速源: v6 / gh-proxy / https://...")] = None,
+    proxy: Annotated[Optional[str], typer.Option("--proxy", help="本次使用的加速源: v6 / v4 / gh-proxy / https://...")] = None,
     no_proxy: Annotated[bool, typer.Option("--no-proxy", help="本次直连, 不走加速")] = False,
 ) -> None:
     """下载仓库 / 文件夹 / 单个文件 / 源码包 / Release 附件, [info]默认走加速[/info].
@@ -131,7 +133,7 @@ def release_cmd(
     source: Annotated[bool, typer.Option("--source", help="额外下载源码包 (tarball)")] = False,
     output: Annotated[str, typer.Option("--output", "-o", help="保存目录")] = ".",
     refresh: Annotated[bool, typer.Option("--fresh", help="忽略 .part 断点, 从零下载")] = False,
-    proxy: Annotated[Optional[str], typer.Option("--proxy", help="本次使用的加速源: v6 / gh-proxy / https://...")] = None,
+    proxy: Annotated[Optional[str], typer.Option("--proxy", help="本次使用的加速源: v6 / v4 / gh-proxy / https://...")] = None,
     no_proxy: Annotated[bool, typer.Option("--no-proxy", help="本次直连, 不走加速")] = False,
 ) -> None:
     """通过 GitHub API 列出并下载 Release 附件, [info]默认走加速[/info].
@@ -139,9 +141,10 @@ def release_cmd(
     终端里直接 [key]gitx release owner/repo[/key] 会先让你挑发布 (含预发布), 再挑要下载的附件;
     两处都直接回车 = 最新发布 + 全部附件。给了 [key]--tag[/key] / [key]--asset[/key] 就是非交互模式。
     中断的下载会留下 [key]<文件>.part[/key], 重跑自动续传 ([key]--fresh[/key] 可忽略)。
+    Release 可单独设加速源 ([key]gitx proxy release on gh-proxy[/key]), 不影响克隆等其它功能。
     """
     info = release.parse_target(target)
-    prefix = config.active_proxy(proxy, no_proxy)
+    prefix = config.active_proxy(proxy, no_proxy, release=True)
     release.run(info, output, prefix, tag=tag, assets=tuple(assets or ()),
                 list_only=list_only, tags=tags, pick=pick, source=source, limit=limit,
                 resume=not refresh)
@@ -674,6 +677,61 @@ def ignore(
 proxy_app = typer.Typer(help="加速管理: 拉取走加速, 推送直连", rich_markup_mode="rich",
                         invoke_without_command=True, context_settings={"help_option_names": ["-h", "--help"]})
 
+# Release 专用加速: 与其它功能分开设置, 例如 Release 换镜像而克隆保持默认
+release_proxy_app = typer.Typer(help="Release 专用加速 (与其它功能的加速分开设置)", rich_markup_mode="rich",
+                                invoke_without_command=True,
+                                context_settings={"help_option_names": ["-h", "--help"]})
+
+
+@release_proxy_app.callback()
+def _release_proxy_root(ctx: typer.Context) -> None:
+    # 不带子命令 = 查看 Release 加速状态
+    if ctx.invoked_subcommand is None:
+        _release_proxy_status()
+
+
+@release_proxy_app.command("status")
+def release_proxy_status() -> None:
+    """查看 Release 专用加速源 (与全局对比)."""
+    _release_proxy_status()
+
+
+@release_proxy_app.command("on")
+def release_proxy_on(
+    source: Annotated[str, typer.Argument(metavar="加速源", help="v6 / v4 / gh-proxy / https://...")] = "v6",
+) -> None:
+    """开启 Release 独立加速 (默认 v6), 其它功能照旧."""
+    accel.resolve(source)
+    config.save({**config.load(), "release_proxy": source})
+    console.done(f"Release 已独立加速: {source} ({accel.resolve(source)})")
+
+
+@release_proxy_app.command("off")
+def release_proxy_off() -> None:
+    """Release 直连 (其它功能仍按全局设置走加速)."""
+    config.save({**config.load(), "release_proxy": "off"})
+    console.done("Release 已设为直连 (其它功能不受影响)")
+
+
+@release_proxy_app.command("follow")
+def release_proxy_follow() -> None:
+    """恢复为跟随全局加速源 (默认)."""
+    config.save({**config.load(), "release_proxy": ""})
+    console.done("Release 已恢复为跟随全局加速源")
+
+
+@release_proxy_app.command("set")
+def release_proxy_set(
+    source: Annotated[str, typer.Argument(metavar="加速源", help="v6 / v4 / gh-proxy / https://...")],
+) -> None:
+    """设置 Release 专用加速源."""
+    accel.resolve(source)
+    config.save({**config.load(), "release_proxy": source})
+    console.done(f"Release 加速源已设为: {source}")
+
+
+proxy_app.add_typer(release_proxy_app, name="release")
+
 
 @proxy_app.callback()
 def _proxy_root(ctx: typer.Context) -> None:
@@ -690,7 +748,7 @@ def proxy_status() -> None:
 
 @proxy_app.command("on")
 def proxy_on(
-    source: Annotated[str, typer.Argument(metavar="加速源", help="v6 / gh-proxy / https://...")] = "v6",
+    source: Annotated[str, typer.Argument(metavar="加速源", help="v6 / v4 / gh-proxy / https://...")] = "v6",
 ) -> None:
     """开启加速 (默认 v6)."""
     cfg = config.load()
@@ -715,7 +773,7 @@ def proxy_default() -> None:
 
 @proxy_app.command("set")
 def proxy_set(
-    source: Annotated[str, typer.Argument(metavar="加速源", help="v6 / gh-proxy / https://...")],
+    source: Annotated[str, typer.Argument(metavar="加速源", help="v6 / v4 / gh-proxy / https://...")],
 ) -> None:
     """设置加速源."""
     cfg = config.load()
@@ -764,6 +822,49 @@ def proxy_uninstall(
 app.add_typer(proxy_app, name="proxy", rich_help_panel=PANEL_PROXY)
 
 
+def _release_source_label(cfg: dict) -> tuple[str, str | None, bool]:
+    """Release 生效加速源: (显示名, 前缀, 是否独立设置)."""
+    raw = config.release_source(cfg)
+    env = os.environ.get("GITX_RELEASE_PROXY", "")
+    global_name = str(cfg.get("proxy", "v6"))
+    if raw:
+        chosen, independent = raw, True
+    elif env:
+        chosen, independent = f"{env} (环境变量 GITX_RELEASE_PROXY)", True
+    else:
+        chosen, independent = f"跟随全局 ({global_name})", False
+    try:
+        prefix = accel.resolve(raw or env or global_name)
+    except ValueError:
+        prefix = None
+    return chosen, prefix, independent
+
+
+def _release_proxy_status() -> None:
+    cfg = config.load()
+    name, prefix, independent = _release_source_label(cfg)
+    table = console.table("项目", "值", title="Release 加速状态")
+    table.add_row("Release 加速源",
+                  console.txt(f"{name} ({prefix})" if prefix else f"{name} (直连, 未加速)"))
+    table.add_row("全局加速源", console.txt(f"{cfg.get('proxy', 'v6')} ({accel.resolve(cfg.get('proxy', 'v6'))})"
+                                            if _resolvable(str(cfg.get("proxy", "v6")))
+                                            else f"{cfg.get('proxy', 'v6')} (直连, 未加速)"))
+    table.add_row("生效范围", console.txt("Release 附件与发布列表 (API)"))
+    table.add_row("配置文件", console.txt(str(config.config_path())))
+    console.print(table)
+    if independent:
+        console.info("取消独立设置: gitx proxy release follow (改为跟随全局)")
+    else:
+        console.info("单独设置: gitx proxy release on gh-proxy | off 直连 | follow 跟随全局")
+
+
+def _resolvable(name: str) -> str | None:
+    try:
+        return accel.resolve(name)
+    except ValueError:
+        return None
+
+
 def _proxy_status() -> None:
     cfg = config.load()
     name = str(cfg.get("proxy", "v6"))
@@ -772,13 +873,18 @@ def _proxy_status() -> None:
     except ValueError:
         prefix = None
     installed = accel.installed_prefix()
+    rel_name, rel_prefix, rel_independent = _release_source_label(cfg)
     table = console.table("项目", "值", title="加速状态")
     table.add_row("加速源", console.txt(f"{name} ({prefix})" if prefix else f"{name} (直连, 未加速)"))
+    table.add_row("Release 加速源",
+                  console.txt((f"{rel_name} ({rel_prefix})" if rel_prefix else f"{rel_name} (直连, 未加速)")
+                              + ("" if rel_independent else "  —  未单独设置")))
     table.add_row("insteadOf", console.txt(f"{installed} (普通 git 命令也走加速)" if installed
                                            else "未安装 (只影响 gitx 自身)"))
     table.add_row("配置文件", console.txt(str(config.config_path())))
     console.print(table)
     console.info("开启/切换: gitx proxy on | auto 测速 | off 直连 | install 让 git 也走加速")
+    console.info("Release 单独设置: gitx proxy release on <源> | off 直连 | follow 跟随全局")
 
 
 def _proxy_auto() -> None:
@@ -806,18 +912,25 @@ def _proxy_auto() -> None:
 
 def _proxy_test() -> None:
     cfg = config.load()
-    name = str(cfg.get("proxy", "v6"))
+    _probe_source(str(cfg.get("proxy", "v6")))
+    rel = config.release_source(cfg) or os.environ.get("GITX_RELEASE_PROXY", "")
+    if rel and rel != str(cfg.get("proxy", "v6")):
+        _probe_source(rel, title="Release 连通性")
+
+
+def _probe_source(name: str, *, title: str = "连通性") -> None:
+    """实测一个加速源的 git / raw / api 三个端点."""
     try:
         prefix = accel.resolve(name)
     except ValueError as exc:
         console.error(str(exc))
     if not prefix:
-        console.info("当前为直连模式, 跳过测试 (gitx proxy on 开启加速)")
+        console.info(f"加速源 {name}: 直连模式, 跳过测试")
         return
     console.step(f"测试加速源: {name} ({prefix})")
     import urllib.request  # noqa: PLC0415 仅网络命令需要, 避免拖慢其它命令
 
-    table = console.table("端点", "结果", title="连通性")
+    table = console.table("端点", "结果", title=title)
     rc, _ = gitcmd.capture(
         ["git", "ls-remote", "--symref", f"{prefix}/https://github.com/octocat/Hello-World.git", "HEAD"]
     )
@@ -914,7 +1027,7 @@ def config_set(
     """修改配置项."""
     if key not in config.DEFAULTS:
         console.error(f"未知配置键: {key} (可用: {', '.join(config.DEFAULTS)})")
-    if key == "proxy":
+    if key in ("proxy", "release_proxy"):
         accel.resolve(value)
     if key == "depth":
         try:
@@ -1017,7 +1130,7 @@ def _do_download(url: str, dest: Optional[str], depth: Optional[int], branch: st
         info = github.parse_url(url)
     except ValueError as exc:
         console.error(f"{exc}\n提示: 其它 git 子命令可直接透传, 如 gitx status")
-    prefix = config.active_proxy(proxy, no_proxy)
+    prefix = config.active_proxy(proxy, no_proxy, release=info["mode"] in ("release", "asset"))
     if info["mode"] in ("release", "asset"):
         release.run(info, dest or ".", prefix, assets=tuple(assets or ()),
                     list_only=list_only, source=source, limit=limit, resume=not fresh)

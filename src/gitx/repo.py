@@ -97,8 +97,13 @@ def info(path: str = ".") -> None:
         track = f"领先 {ahead} | 落后 {behind}" + ("   先 gitx pull 再推送" if behind else "")
 
     prefix = config.active_proxy()
-    speed = (f"{config.load().get('proxy')} ({prefix}) [拉取加速 / 推送直连]"
+    cfg = config.load()
+    speed = (f"{cfg.get('proxy')} ({prefix}) [拉取加速 / 推送直连]"
              if prefix else "直连")
+    rel_raw = config.release_source(cfg)
+    if rel_raw:
+        rel_prefix = config.active_proxy(release=True)
+        speed += f" | Release: {rel_raw} ({rel_prefix})" if rel_prefix else f" | Release: {rel_raw} (直连)"
 
     repo_table = console.table("项目", "值", title="仓库")
     repo_table.add_row("路径", console.txt(root or os.path.abspath(path)))

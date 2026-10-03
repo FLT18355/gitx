@@ -2,7 +2,11 @@
 
 给中国人用的 GitHub 加速与同步工具 —— 下载 / 同步 / 加速, 一条命令搞定。
 
-> **v1.0.0: 1.0 正式版** —— 补齐日常 git 操作, 从"加速下载工具"变成"日常用得上"的命令行:
+> **v1.0.1: Release 加速可独立设置** —— 新增配置键 `release_proxy` 与 `gitx proxy release`:
+> Release 附件与发布列表 (API) 可以单独走某个加速源、单独直连, 或者跟随全局;
+> 克隆 / 同步 / 搜索等其它功能不受影响。同时新增 IPv4 加速源 `v4` (`https://v4.gh-proxy.org`),
+> `gitx proxy auto` 会把它一起纳入测速 (`gitx proxy on v4` / `gitx proxy release on v4`)。
+> v1.0.0: 1.0 正式版 —— 补齐日常 git 操作, 从"加速下载工具"变成"日常用得上"的命令行:
 > 分支 (`branch` / `switch` / `merge` / `rebase` / `fetch`)、暂存 (`stash`)、标签 (`tag`)、
 > 提交 (`commit`)、改动查看与回退 (`diff` / `discard` / `clean`);
 > 内部统一了前置检查与推送直连逻辑。每个 Release 同时提供**源码包**与 **uv 构建的 wheel**。
@@ -27,7 +31,7 @@ uv run gitx -h   # 或: uv run python -m gitx --help
 或者从 Release 附件安装 (每个版本都提供**源码包**与 **uv 构建的 wheel** 两个文件):
 
 ```bash
-uv tool install gitx-1.0.0-py3-none-any.whl    # 或: uv tool install .
+uv tool install gitx-1.0.1-py3-none-any.whl    # 或: uv tool install .
 ```
 
 ## 用法
@@ -79,6 +83,17 @@ gitx https://github.com/owner/repo/releases --list              # 只看清单
 实现要点: 走 `api.github.com/repos/{owner}/{repo}/releases`(经加速镜像访问), 已登录 `gh` 或配置
 `token` 时自动带上认证(限额 60 → 5000 次/小时); 附件按 `browser_download_url` 直下并显示进度条,
 支持断点续传; 该 Release 没有附件时自动回退到源码包。
+
+Release 的加速源可以**单独设置**(不影响克隆 / 同步 / 搜索等其它功能):
+
+```bash
+gitx proxy release              # 查看 Release 当前用的加速源 (与全局对比)
+gitx proxy release on v4        # Release 走 v4; 其它功能仍走全局 (默认 v6)
+gitx proxy release off          # Release 直连; 其它功能照旧走加速
+gitx proxy release follow       # 取消独立设置, 跟随全局加速源 (默认)
+```
+
+一次性的 `--proxy <源>` / `--no-proxy` 仍然优先级最高, 对单条命令生效。
 
 ### 探索 (新)
 
@@ -212,17 +227,22 @@ gitx tag delete v1.0.0 -r         # 连 origin 上的标签一起删
 ### 加速管理
 
 ```bash
-gitx proxy            # 查看状态(表格: 加速源 / insteadOf / 配置文件)
-gitx proxy auto       # 自动测速(git 克隆端点), 选用最快的加速源
+gitx proxy            # 查看状态(表格: 加速源 / Release 加速源 / insteadOf / 配置文件)
+gitx proxy auto       # 自动测速(git 克隆端点: v6 / v4 / gh-proxy / 直连), 选用最快的
 gitx proxy on         # 开启加速(v6.gh-proxy.org)
+gitx proxy on v4      # 换用 IPv4 端点(v4.gh-proxy.org)
 gitx proxy off        # 关闭加速(直连)
 gitx proxy default    # 恢复默认加速源
 gitx proxy set https://gh-proxy.com   # 自定义加速源
+gitx proxy release    # 查看 Release 专用加速源
+gitx proxy release on v4              # 只给 Release 换加速源(其它功能照旧)
+gitx proxy release off                # Release 直连(其它功能仍走加速)
+gitx proxy release follow             # 取消独立设置, 跟随全局
 gitx proxy http http://127.0.0.1:7890 # 设置 git 的 HTTP(S) 代理(本地代理软件)
 gitx proxy http off   # 取消 git 代理
 gitx proxy install    # 写入 git 全局 insteadOf 规则, 让普通 git 命令也走加速
 gitx proxy uninstall  # 移除上述规则
-gitx proxy test       # 测试加速源连通性(git 克隆 / raw / API)
+gitx proxy test       # 测试加速源连通性(git 克隆 / raw / API; Release 独立设置时会一并测试)
 ```
 
 ### 其它
@@ -232,6 +252,7 @@ gitx config                 # 查看配置
 gitx config set depth 0     # 默认完整克隆
 gitx config set message 更新 # 默认提交信息
 gitx config set token ghp_xxx   # 设置 API token (提高限额到 5000 次/小时, 显示时自动打码)
+gitx config set release_proxy v4       # 等价于 gitx proxy release set v4 (空值 = 跟随全局)
 gitx doctor                 # 环境自检(git/gh/token/仓库/加速源/编码)
 gitx status / gitx log --oneline   # git 子命令直接透传 (原生 init: gitx git init)
 gitx dowload ...            # 子命令笔误会给出形近提示
@@ -242,7 +263,8 @@ gitx dowload ...            # 子命令笔误会给出形近提示
 其余词仍原样交给 git (`gitx status` / `gitx log --oneline` / `gitx blame ...`),
 需要未经改写的行为时用 `gitx git <任意命令>` 显式透传。
 
-环境变量 `GITX_PROXY=off|v6|gh-proxy|https://...` 可设置全局默认加速源。
+环境变量 `GITX_PROXY=off|v6|v4|gh-proxy|https://...` 可设置全局默认加速源,
+`GITX_RELEASE_PROXY=...` 单独覆盖 Release 功能的加速源。
 
 ## 为什么快 (实测数字, 2026-10 经 v6.gh-proxy.org)
 
@@ -260,6 +282,9 @@ gitx dowload ...            # 子命令笔误会给出形近提示
 ## 原理
 
 - 加速 = 在 GitHub 域名 URL 前拼镜像前缀, 如 `https://v6.gh-proxy.org/https://github.com/...`
+- Release 加速可**独立设置**: `release_proxy`(或 `GITX_RELEASE_PROXY`) 只作用于 `gitx release`
+  与发布页链接, 解析链 `--proxy > GITX_RELEASE_PROXY > release_proxy > GITX_PROXY > proxy`;
+  留空 = 跟随全局, 所以不设置时行为与旧版一致 —— 某个镜像对 API 限流时只需换 Release 那条链路
 - 拉取(克隆 / 下载 / Release 附件 / API)走加速; 推送走直连 —— 镜像对 `git push` 返回 405
 - 存在全局 insteadOf 规则时, 推送地址自动改用 SSH(gh 已配好密钥), 避免 https 推送被规则重写到镜像
 - `gitx proxy install` 利用 git 自身的 `url.<镜像>/.insteadOf` 规则, 全局生效

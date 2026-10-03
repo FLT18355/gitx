@@ -9,7 +9,8 @@ from pathlib import Path
 from . import accel, console
 
 DEFAULTS: dict[str, object] = {
-    "proxy": "v6",        # 加速源: v6 / gh-proxy / off / 自定义 https://...
+    "proxy": "v6",        # 加速源: v6 / v4 / gh-proxy / off / 自定义 https://...
+    "release_proxy": "",  # Release 专用加速源, 空 = 跟随 proxy (独立设置: gitx proxy release)
     "depth": 1,           # 克隆深度, 0 = 完整克隆
     "branch": "",         # 默认分支, 空 = 自动探测
     "message": "日常同步更新",  # push 默认提交信息
@@ -50,14 +51,29 @@ def save(data: dict) -> None:
     path.write_text(json.dumps(merged, ensure_ascii=False, indent=2) + "\n", "utf-8")
 
 
-def active_proxy(flag: str | None = None, no_proxy: bool = False) -> str | None:
+def release_source(cfg: dict | None = None) -> str:
+    """Release 功能的独立加速源设置; 空串 = 跟随全局 proxy."""
+    data = load() if cfg is None else cfg
+    return str(data.get("release_proxy") or "")
+
+
+def active_proxy(flag: str | None = None, no_proxy: bool = False, *, release: bool = False) -> str | None:
     """返回本次生效的加速前缀; None = 直连.
 
-    优先级: 命令行 --proxy > 环境变量 GITX_PROXY > 配置文件.
+    优先级:
+      普通操作: --proxy > GITX_PROXY > 配置 proxy
+      Release:  --proxy > GITX_RELEASE_PROXY > 配置 release_proxy > GITX_PROXY > 配置 proxy
+    release_proxy 为空 = 跟随全局, 因此不设置时行为与旧版完全一致.
     """
     if no_proxy:
         return None
-    name = flag or os.environ.get("GITX_PROXY") or str(load().get("proxy", "v6"))
+    data = load()
+    if release:
+        name = (flag or os.environ.get("GITX_RELEASE_PROXY")
+                or release_source(data)
+                or os.environ.get("GITX_PROXY") or str(data.get("proxy", "v6")))
+    else:
+        name = flag or os.environ.get("GITX_PROXY") or str(data.get("proxy", "v6"))
     try:
         return accel.resolve(name)
     except ValueError as exc:

@@ -12,7 +12,8 @@ from __future__ import annotations
 import subprocess
 
 PROVIDERS: dict[str, str] = {
-    "v6": "https://v6.gh-proxy.org",    # 本项目默认加速源
+    "v6": "https://v6.gh-proxy.org",    # 本项目默认加速源 (IPv6 优先)
+    "v4": "https://v4.gh-proxy.org",    # 同服务 IPv4 端点 (没有 IPv6 时用)
     "gh-proxy": "https://gh-proxy.com",  # 通用公共镜像(备用)
 }
 

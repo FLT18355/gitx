@@ -1,6 +1,6 @@
 ---
 name: gitx
-version: 1.0.0
+version: 1.0.1
 description: 给中国人用的 GitHub 加速与同步工具 —— 下载 / 同步 / 加速 / 分支 / 暂存 / 标签 / 提交 / 改动
 author: FLT18355
 repository: https://github.com/FLT18355/gitx
@@ -21,16 +21,19 @@ cd gitx
 uv tool install .
 
 # 方式 2：从 Release 附件安装（wheel）
-uv tool install gitx-1.0.0-py3-none-any.whl
+uv tool install gitx-1.0.1-py3-none-any.whl
 
 # 验证
-gitx --version      # 应输出 gitx 1.0.0
+gitx --version      # 应输出 gitx 1.0.1
 gitx doctor         # 环境自检
 ```
 
 ## 核心特性
 
 - **默认走加速镜像** `https://v6.gh-proxy.org` 拉取（克隆 / 下载 / Release 附件 / API），推送直连 GitHub
+- **Release 加速可独立设置**：`release_proxy` / `GITX_RELEASE_PROXY` 只影响 Release 附件与发布列表，
+  克隆 / 同步 / 搜索等照旧走全局加速源（`gitx proxy release on v4|off|follow`）
+- **四个加速源可选**：v6 / v4（IPv4 端点）/ gh-proxy / 自定义 URL，`gitx proxy auto` 实测选最快
 - **Typer + Rich** 构建分组式 CLI：彩色表格、下载进度条（速率 / 剩余时间）
 - **交互式挑选**用 questionary：上下键选择、最多渲染 5 行、打字即筛选
 - **git 透传不加载 typer**：`gitx status` / `gitx log --oneline` 几乎瞬时完成
@@ -106,11 +109,15 @@ gitx ignore python node [--force]                   # 拉取 .gitignore 模板
 
 ### 加速管理
 ```bash
-gitx proxy [status]          # 查看状态
-gitx proxy on|off|auto|default|set <源>
+gitx proxy [status]          # 查看状态（含 Release 专用加速源）
+gitx proxy on|off|auto|default|set <源>   # 源: v6 / v4 / gh-proxy / https://...
+gitx proxy release           # 查看 Release 专用加速源
+gitx proxy release on v4     # 只给 Release 换加速源（克隆等其它功能照旧）
+gitx proxy release off       # Release 直连（其它功能仍走加速）
+gitx proxy release follow    # 取消独立设置，跟随全局（默认）
 gitx proxy http http://127.0.0.1:7890 [--local]  # 设置 HTTP 代理
 gitx proxy install|uninstall [--local]         # 写入/移除 git insteadOf 规则
-gitx proxy test                # 测试加速源连通性
+gitx proxy test                # 测试加速源连通性（Release 独立设置时会一并测试）
 ```
 
 ### 配置与自检
@@ -157,7 +164,8 @@ gitx tag new v1.0.0 "首个正式版" && gitx tag push
 ## 环境变量
 
 ```bash
-GITX_PROXY=off|v6|gh-proxy|https://...  # 全局默认加速源
+GITX_PROXY=off|v6|v4|gh-proxy|https://...  # 全局默认加速源
+GITX_RELEASE_PROXY=off|v6|v4|gh-proxy|... # 只覆盖 Release 功能的加速源
 ```
 
 ## 配置文件
@@ -165,7 +173,8 @@ GITX_PROXY=off|v6|gh-proxy|https://...  # 全局默认加速源
 `~/.config/gitx/config.json`（或 `$XDG_CONFIG_HOME/gitx/config.json`）
 
 可配置键：
-- `proxy` = v6 / gh-proxy / off / 自定义 URL
+- `proxy` = v6 / v4 / gh-proxy / off / 自定义 URL
+- `release_proxy` = Release 专用加速源（空 = 跟随 proxy，`gitx proxy release` 管理）
 - `depth` = 克隆深度 (默认 1，0 = 完整克隆)
 - `branch` = 默认分支 (空 = 自动探测)
 - `message` = push 默认提交信息

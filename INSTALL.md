@@ -17,7 +17,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh   # Linux/macOS
 git clone https://github.com/FLT18355/gitx.git
 cd gitx
 uv tool install .        # 构建并安装到 uv 的独立 venv, 提供全局 gitx 命令
-gitx --version           # 验证: 应输出 gitx 1.0.0
+gitx --version           # 验证: 应输出 gitx 1.0.1
 ```
 
 安装后可在任意目录直接运行 `gitx`。升级时重新执行 `uv tool install .`（会先卸载旧版）。
@@ -45,8 +45,12 @@ gitx https://github.com/git/git   # 实测下载 (默认走加速镜像, 浅克�
 默认拉取走 `https://v6.gh-proxy.org`，推送直连 GitHub。常用管理命令：
 
 ```bash
-gitx proxy auto      # 实测测速, 自动选最快的加速源
+gitx proxy auto      # 实测测速, 自动选最快的加速源 (v6 / v4 / gh-proxy / 直连)
+gitx proxy on v4     # 换成 IPv4 端点
 gitx proxy off       # 关闭加速, 全部直连
+gitx proxy release on v4   # 只给 Release 换加速源 (克隆 / 同步等照旧)
+gitx proxy release off     # Release 直连, 其它功能仍走加速
+gitx proxy release follow  # 取消独立设置, 跟随全局
 gitx config set token ghp_xxx   # 设置 GitHub API token, 限额 60 -> 5000 次/小时
 ```
 
@@ -68,7 +72,7 @@ command -v uv || curl -LsSf https://astral.sh/uv/install.sh | sh
 # 2. Clone and install
 git clone https://github.com/FLT18355/gitx.git /tmp/gitx-install
 uv tool install /tmp/gitx-install
-# 3. Verify (expect "gitx 1.0.0" plus a config table from `gitx config`)
+# 3. Verify (expect "gitx 1.0.1" plus a config table from `gitx config`)
 gitx --version && gitx doctor
 ```
 

@@ -6,14 +6,12 @@
 > Release 附件与发布列表 (API) 可以单独走某个加速源、单独直连, 或者跟随全局;
 > 克隆 / 同步 / 搜索等其它功能不受影响。同时新增 IPv4 加速源 `v4` (`https://v4.gh-proxy.org`),
 > `gitx proxy auto` 会把它一起纳入测速 (`gitx proxy on v4` / `gitx proxy release on v4`)。
+
+
 > v1.0.0: 1.0 正式版 —— 补齐日常 git 操作, 从"加速下载工具"变成"日常用得上"的命令行:
 > 分支 (`branch` / `switch` / `merge` / `rebase` / `fetch`)、暂存 (`stash`)、标签 (`tag`)、
 > 提交 (`commit`)、改动查看与回退 (`diff` / `discard` / `clean`);
 > 内部统一了前置检查与推送直连逻辑。每个 Release 同时提供**源码包**与 **uv 构建的 wheel**。
-> v0.6.1: 新增 `gitx stat` —— 一条命令看仓库的 star / fork / topics / 语言 / 许可证 /
-> 贡献者 / 最新发布 (表格展示, `--json` 供脚本)。
-> v0.6.0: 新增图表 / 分支 / 体检 / 远端切换 / 搜索 / 网页 / .gitignore 模板,
-> 文件夹下载改用部分克隆 (实测快 8 倍), 下载支持断点续传, git 透传不再加载 typer (启动快 ~4 倍)。
 
 默认走加速镜像 `https://v6.gh-proxy.org` 拉取, 推送直连 GitHub(镜像不支持推送)。
 

@@ -2,6 +2,8 @@
 
 给中国人用的 GitHub 加速与同步工具 —— 下载 / 同步 / 加速, 一条命令搞定。
 
+> v0.6.1: 新增 `gitx stat` —— 一条命令看仓库的 star / fork / topics / 语言 / 许可证 /
+> 贡献者 / 最新发布 (表格展示, `--json` 供脚本)。
 > v0.6.0: 新增图表 / 分支 / 体检 / 远端切换 / 搜索 / 网页 / .gitignore 模板,
 > 文件夹下载改用部分克隆 (实测快 8 倍), 下载支持断点续传, git 透传不再加载 typer (启动快 ~4 倍)。
 
@@ -78,11 +80,20 @@ gitx web                                    # 浏览器打开当前仓库主页
 gitx web issues / pulls / releases / actions / wiki
 gitx web branch / commit                    # 打开当前分支 / HEAD 提交页
 gitx web --print                            # 只打印地址, 不打开浏览器
+gitx stat cli/cli                           # 仓库概览: ★ star / fork / topics / 语言 / 许可证 / 贡献者 / 最新发布
+gitx stat                                   # 不写参数 = 当前仓库 origin 的概览
+gitx stat cli/cli --json                    # 输出 JSON (脚本友好, 含 languages / contributors)
 gitx ignore --list java                     # 列出可用 .gitignore 模板 (模糊匹配)
 gitx ignore python node macos               # 从 github/gitignore 拉取模板写入 .gitignore
 ```
 
 `gitx ignore` 的模板索引缓存一周 (`~/.cache/gitx/gitignore.json`), 删掉会自动重建。
+
+`gitx stat` 走 GitHub API (默认加速, 也可 `--no-proxy` 直连), 一次可看: ★ star / fork / watcher /
+开放 issue / 贡献者 / 网络仓库数、topics 标签、语言构成与占比、许可证、创建/更新/推送时间线、
+默认分支与体积、归档/复刻/模板等状态, 以及最新发布 (标签 / 日期 / 附件数)。数据取自
+`/repos/{owner}/{repo}` 与 `languages` / `contributors` / `releases/latest`; 后面几个接口
+失败 (如无发布) 会被忽略而非报错。匿名限额 60 次/小时, 配 `token` 可到 5000 (`gitx config set token`)。
 
 ### 同步
 
@@ -191,7 +202,7 @@ src/gitx/
   github.py     URL 解析 + REST API 客户端 (token 复用)   net.py        HTTP 下载: 断点续传 + 进度条
   download.py   仓库/文件夹/源码包下载                    release.py    Release 附件(API)
   repo.py       init / info / undo / graph / branches / tidy / url
-  hub.py        search / web / ignore
+  hub.py        search / stat / web / ignore
   sync.py       push / pull / sync
 ```
 

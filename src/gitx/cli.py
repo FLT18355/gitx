@@ -41,6 +41,7 @@ _EPILOG = """[key]示例[/key]
   gitx release cli/cli --list                       看最新发布的附件清单
   gitx release cli/cli --asset '*linux_amd64*'      只下匹配的附件
   gitx search "cli 工具" --language go -d           搜仓库并下载第 1 个
+  gitx stat cli/cli                                 看仓库概览 (★ star / topics / 语言 / 贡献者)
   gitx graph -n 30                                  带图形的提交历史
   gitx tidy --gc                                    仓库体检 + 打包瘦身
   gitx url accel                                    让 origin 拉取走加速
@@ -300,6 +301,23 @@ def search(
         index = picked
     repo_full = str(items[index].get("full_name") or "")
     _do_download(f"https://github.com/{repo_full}", dest, depth, "", proxy, no_proxy)
+
+
+@app.command(rich_help_panel=PANEL_HUB)
+def stat(
+    target: Annotated[Optional[str], typer.Argument(
+        metavar="[仓库|链接]", help="owner/repo 或 GitHub 链接, 缺省取当前仓库 origin")] = None,
+    json_out: Annotated[bool, typer.Option("--json", help="输出 JSON (脚本友好), 不渲染表格")] = False,
+    proxy: Annotated[Optional[str], typer.Option("--proxy", help="本次使用的加速源")] = None,
+    no_proxy: Annotated[bool, typer.Option("--no-proxy", help="本次直连, 不走加速")] = False,
+) -> None:
+    """查看仓库信息: [num]star[/num] / fork / [num]topics[/num] / 语言 / 许可证 / 贡献者 / 最新发布.
+
+    不给参数时读取当前仓库的 origin, 例如在仓库目录里直接 [key]gitx stat[/key]。
+    数据来自 GitHub API (默认加速); 配置 [key]token[/key] 可把限额 60 提到 5000 次/小时。
+    """
+    prefix = config.active_proxy(proxy, no_proxy)
+    hub.stat(target or "", prefix, json_out=json_out)
 
 
 @app.command(rich_help_panel=PANEL_HUB)

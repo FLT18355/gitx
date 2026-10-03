@@ -123,8 +123,12 @@ def api_token() -> str:
     return _TOKEN
 
 
-def api(url: str, prefix: str | None = None, *, timeout: int = 30) -> object:
-    """请求 GitHub REST API (走加速); 失败时打印原因并退出."""
+def _request(url: str, prefix: str | None, *, timeout: int, quiet: bool) -> tuple[object, dict]:
+    """请求 GitHub REST API (走加速) -> (JSON, 响应头); 失败返回 (None, {}).
+
+    quiet=False 时打印失败原因并以退出码 1 结束进程 (主线数据用);
+    quiet=True 时静默返回 None (可选信息用, 如"最新发布"对无发布的仓库会 404)。
+    """
     import urllib.error  # noqa: PLC0415  仅网络命令需要, 避免拖慢其它命令的启动
     import urllib.request
 
@@ -134,8 +138,11 @@ def api(url: str, prefix: str | None = None, *, timeout: int = 30) -> object:
         req.add_header("Authorization", f"Bearer {token}")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+            headers = {k.lower(): v for k, v in resp.headers.items()}
+            return json.loads(resp.read().decode("utf-8")), headers
     except urllib.error.HTTPError as exc:
+        if quiet:
+            return None, {}
         if exc.code == 404:
             console.error("未找到该资源\n提示: 检查 owner/repo 是否正确, 或用 --tags 查看可用标签")
         if exc.code in (403, 429):
@@ -143,8 +150,30 @@ def api(url: str, prefix: str | None = None, *, timeout: int = 30) -> object:
                           "提示: 设置 token 可提高到 5000 次/小时 (gitx config set token <token>)")
         console.error(f"API 请求失败 HTTP {exc.code}: {url}")
     except (urllib.error.URLError, OSError) as exc:
+        if quiet:
+            return None, {}
         console.error(f"API 请求失败: {exc}\n提示: gitx proxy test 检查加速源, 或 --no-proxy 直连")
-    return None
+    return None, {}
+
+
+def api(url: str, prefix: str | None = None, *, timeout: int = 30) -> object:
+    """请求 GitHub REST API (走加速); 失败时打印原因并退出."""
+    return _request(url, prefix, timeout=timeout, quiet=False)[0]
+
+
+def api_try(url: str, prefix: str | None = None, *, timeout: int = 30) -> object:
+    """请求 API 的"可选"数据: 失败 (含 404 / 限流) 时静默返回 None."""
+    return _request(url, prefix, timeout=timeout, quiet=True)[0]
+
+
+def api_count(url: str, prefix: str | None = None, *, timeout: int = 30) -> int:
+    """分页接口的总条目数 (如贡献者): 借 Link 头得到总数; 失败返回 -1."""
+    sep = "&" if "?" in url else "?"
+    data, headers = _request(f"{url}{sep}per_page=1", prefix, timeout=timeout, quiet=True)
+    if not isinstance(data, list):
+        return -1
+    m = re.search(r'[?&]page=(\d+)>;\s*rel="last"', headers.get("link", ""))
+    return int(m.group(1)) if m else len(data)
 
 
 def get_text(url: str, prefix: str | None = None, *, timeout: int = 30) -> str:

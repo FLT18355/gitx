@@ -23,7 +23,7 @@ SUBCOMMANDS = frozenset({
     "download", "clone", "release",
     "push", "pull", "sync",
     "init", "info", "undo", "graph", "lg", "branches", "tidy", "url",
-    "search", "web", "ignore",
+    "search", "stat", "web", "ignore",
     "proxy", "config", "doctor", "git",
 })
 

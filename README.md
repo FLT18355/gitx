@@ -2,6 +2,13 @@
 
 给中国人用的 GitHub 加速与同步工具 —— 下载 / 同步 / 加速, 一条命令搞定。
 
+> **v1.0.2: Catppuccin Mocha 主题 + 欢迎页 + 修复** ——
+> 终端配色统一为 **Catppuccin Mocha**(表格 / 面板 / 进度条 / 交互选择器同源取色, 见 `console.py` 的 `MOCHA`);
+> 只输入 `gitx` 不再刷一屏帮助, 改成版本 + 加速状态 + 常用命令速查(全量帮助仍在 `gitx -h`);
+> `gitx help [命令]` / `--install-completion` / `--show-completion` 交给 typer 正确处理;
+> 修复 `git status --porcelain` 首行被 `strip()` 吃掉行首空格 → 未暂存改动被误判为"已暂存"的统计错位,
+> 并让 `--local` 的 insteadOf 规则也能在推送时被检测到(自动改用 SSH 直连, 避免被镜像 405 拒绝)。
+
 > **v1.0.1: Release 加速可独立设置** —— 新增配置键 `release_proxy` 与 `gitx proxy release`:
 > Release 附件与发布列表 (API) 可以单独走某个加速源、单独直连, 或者跟随全局;
 > 克隆 / 同步 / 搜索等其它功能不受影响。同时新增 IPv4 加速源 `v4` (`https://v4.gh-proxy.org`),
@@ -15,7 +22,8 @@
 
 默认走加速镜像 `https://v6.gh-proxy.org` 拉取, 推送直连 GitHub(镜像不支持推送)。
 
-命令行用 **Typer + Rich** 构建: 分组式帮助、彩色表格、下载进度条(速率 / 剩余时间);
+命令行用 **Typer + Rich** 构建: 分组式帮助、彩色表格、下载进度条(速率 / 剩余时间),
+配色统一为 **Catppuccin Mocha**; 直接运行 `gitx` 显示版本 + 加速状态 + 常用命令速查, `gitx -h` 才是完整帮助。
 交互式挑选(Release 发布 / 附件 / 搜索结果)用 **questionary**: 上下键选择、最多渲染 5 行、打字即筛选。
 
 ## 安装
@@ -29,7 +37,7 @@ uv run gitx -h   # 或: uv run python -m gitx --help
 或者从 Release 附件安装 (每个版本都提供**源码包**与 **uv 构建的 wheel** 两个文件):
 
 ```bash
-uv tool install gitx-1.0.1-py3-none-any.whl    # 或: uv tool install .
+uv tool install gitx-1.0.2-py3-none-any.whl    # 或: uv tool install .
 ```
 
 ## 用法
@@ -284,7 +292,7 @@ gitx dowload ...            # 子命令笔误会给出形近提示
   与发布页链接, 解析链 `--proxy > GITX_RELEASE_PROXY > release_proxy > GITX_PROXY > proxy`;
   留空 = 跟随全局, 所以不设置时行为与旧版一致 —— 某个镜像对 API 限流时只需换 Release 那条链路
 - 拉取(克隆 / 下载 / Release 附件 / API)走加速; 推送走直连 —— 镜像对 `git push` 返回 405
-- 存在全局 insteadOf 规则时, 推送地址自动改用 SSH(gh 已配好密钥), 避免 https 推送被规则重写到镜像
+- 存在 URL 重写规则(全局或仓库本地 `--local`)时, 推送地址自动改用 SSH(gh 已配好密钥), 避免 https 推送被规则重写到镜像
 - `gitx proxy install` 利用 git 自身的 `url.<镜像>/.insteadOf` 规则, 全局生效
 - 分支自动探测:`git ls-remote --symref` 取默认分支(main/master)
 - 文件夹下载: 部分克隆 + 稀疏检出(`--filter=blob:none --sparse`), 检出时按需拉取目标目录的 blob
@@ -298,7 +306,7 @@ gitx dowload ...            # 子命令笔误会给出形近提示
 ```
 src/gitx/
   __init__.py   入口: 快速分发先行, 需要时才加载 typer    dispatch.py   git 透传 / --version 快速通道 (仅标准库)
-  console.py    rich 控制台 (进度条/questionary 交互选择)  config.py     持久化配置 (~/.config/gitx/config.json)
+  console.py    rich 控制台 (Catppuccin 主题)    config.py     持久化配置 (~/.config/gitx/config.json)
   accel.py      加速源与测速                              gitcmd.py     git 命令封装 (前置检查/分支/推送/维护原语)
   github.py     URL 解析 + REST API 客户端 (token 复用)   net.py        HTTP 下载: 断点续传 + 进度条
   download.py   仓库/文件夹/源码包下载                    release.py    Release 附件(API)
@@ -315,13 +323,13 @@ src/gitx/
 ```bash
 uv run python -m gitx --help
 uv run python -m gitx release cli/cli --list   # API + 加速 的实测例子
-uv build                                        # 构建 sdist + wheel (发布用)
+uv build --out-dir dist                         # 构建 sdist + wheel (发布用)
 ```
 
 ## 发布
 
 按 [RELEASE_TEMPLATE.md](./RELEASE_TEMPLATE.md) 执行: 版本号双改 (`pyproject.toml` + `__init__.py`),
-`uv build` 产出 `dist/gitx-X.Y.Z.tar.gz` 与 `dist/gitx-X.Y.Z-py3-none-any.whl`,
+`uv build --out-dir dist` 产出 `dist/gitx-X.Y.Z.tar.gz` 与 `dist/gitx-X.Y.Z-py3-none-any.whl`,
 打 tag 后用 `gh release create` **同时上传这两个附件** (源码包 + wheel), 上传后再下载验证 wheel 可安装。
 
 ## 许可

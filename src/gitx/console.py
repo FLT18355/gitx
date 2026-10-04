@@ -23,21 +23,38 @@ from rich.theme import Theme
 if TYPE_CHECKING:  # 仅供类型检查, 运行时不导入
     from rich.progress import Progress
 
+# Catppuccin Mocha 官方调色板 (https://catppuccin.com/palette) —— 全项目统一取色
+MOCHA: dict[str, str] = {
+    "base": "#1e1e2e", "mantle": "#181825", "crust": "#11111b",
+    "text": "#cdd6f4", "subtext1": "#bac2de", "subtext0": "#a6adc8",
+    "overlay2": "#9399b2", "overlay1": "#7f849c", "overlay0": "#6c7086",
+    "surface2": "#585b70", "surface1": "#45475a", "surface0": "#313244",
+    "rosewater": "#f5e0dc", "flamingo": "#f2cdcd", "pink": "#f5c2e7",
+    "mauve": "#cba6f7", "red": "#f38ba8", "maroon": "#eba0ac",
+    "peach": "#fab387", "yellow": "#f9e2af", "green": "#a6e3a1",
+    "teal": "#94e2d5", "sky": "#89dceb", "sapphire": "#74c7ec",
+    "blue": "#89b4fa", "lavender": "#b4befe",
+}
+
+# 语义命名 -> Catppuccin Mocha 颜色 (整个 CLI 只认语义名, 主题集中在这里换肤)
 THEME = Theme({
-    "info": "green",
-    "step": "cyan",
-    "warn": "yellow",
-    "err": "bold red",
-    "ok": "bold green",
-    "key": "bold cyan",
-    "num": "bold yellow",
-    "dim": "dim",
-    "title": "bold cyan",
-    "hash": "yellow",
-    "graph": "green",
-    "branch": "bold cyan",
-    "tag": "magenta",
-    "date": "dim cyan",
+    "info": MOCHA["green"],
+    "step": MOCHA["sky"],
+    "warn": MOCHA["yellow"],
+    "err": f"bold {MOCHA['red']}",
+    "ok": f"bold {MOCHA['green']}",
+    "key": f"bold {MOCHA['blue']}",
+    "num": f"bold {MOCHA['yellow']}",
+    "option": f"bold {MOCHA['peach']}",
+    "dim": MOCHA["overlay0"],
+    "title": f"bold {MOCHA['mauve']}",
+    "hash": MOCHA["peach"],
+    "graph": MOCHA["green"],
+    "branch": f"bold {MOCHA['sapphire']}",
+    "tag": MOCHA["pink"],
+    "head": f"bold {MOCHA['mauve']}",
+    "date": MOCHA["overlay1"],
+    "border": MOCHA["surface1"],
 })
 
 # 提示符: [+] 信息  [*] 进行中  [ok] 完成  [!] 警告  [-] 错误  [?] 询问
@@ -89,7 +106,7 @@ def rule(title: str = "") -> None:
     console.rule(f"[key]{escape(title)}[/key]" if title else "")
 
 
-def panel(body: Any, title: str = "", border: str = "cyan") -> None:
+def panel(body: Any, title: str = "", border: str = MOCHA["blue"]) -> None:
     console.print(Panel(body, title=f"[key]{escape(title)}[/key]" if title else None,
                         border_style=border, expand=False))
 
@@ -97,7 +114,7 @@ def panel(body: Any, title: str = "", border: str = "cyan") -> None:
 def table(*columns: str, title: str = "") -> Table:
     """建一个统一样式的表格; 单元格请用 txt() / styled() 包住."""
     t = Table(title=title or None, title_justify="left", title_style="title",
-              header_style="key", border_style="dim", pad_edge=False, expand=False)
+              header_style="key", border_style="border", pad_edge=False, expand=False)
     for name in columns:
         t.add_column(name, overflow="fold")
     return t
@@ -148,17 +165,17 @@ def is_terminal() -> bool:
 
 
 PICKER_STYLE = (
-    ("qmark", "fg:cyan bold"),
-    ("question", "bold"),
-    ("pointer", "fg:cyan bold"),
-    ("highlighted", "fg:cyan bold"),
-    ("selected", "fg:cyan"),
-    ("answer", "fg:cyan bold"),
-    ("instruction", "fg:#808080"),
-    ("search_success", "fg:cyan"),
-    ("search_none", "fg:red italic"),
-    ("separator", "fg:#808080"),
-    ("disabled", "fg:#808080 italic"),
+    ("qmark", f"fg:{MOCHA['mauve']} bold"),
+    ("question", f"fg:{MOCHA['text']} bold"),
+    ("pointer", f"fg:{MOCHA['mauve']} bold"),
+    ("highlighted", f"fg:{MOCHA['mauve']} bold"),
+    ("selected", f"fg:{MOCHA['green']}"),
+    ("answer", f"fg:{MOCHA['blue']} bold"),
+    ("instruction", f"fg:{MOCHA['overlay1']}"),
+    ("search_success", f"fg:{MOCHA['green']}"),
+    ("search_none", f"fg:{MOCHA['red']} italic"),
+    ("separator", f"fg:{MOCHA['overlay1']}"),
+    ("disabled", f"fg:{MOCHA['overlay0']} italic"),
 )
 MAX_VISIBLE = 5  # 交互列表最多同时渲染几行, 超出的部分靠上下键滚动
 

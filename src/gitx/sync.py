@@ -12,7 +12,7 @@ def do_pull(path: str = ".", rebase: bool = False, no_proxy: bool = False) -> No
     prefix = config.active_proxy(no_proxy=no_proxy)
     branch = gitcmd.current_branch(path)
     if branch and not gitcmd.has_upstream(path):
-        if gitcmd.remote_branch_exists("origin", branch, path):
+        if gitcmd.remote_branch_exists("origin", branch, path, prefix):
             gitcmd.set_upstream("origin", branch, path)
             console.info(f"已关联上游: origin/{branch}")
         else:
@@ -41,7 +41,7 @@ def do_push(path: str = ".", message: str = "", force: bool = False,
             console.error(str(exc))
         direct = github.repo_clone_url(info["owner"], info["repo"])
         fetch = accel.wrap(direct, prefix)
-        changed = gitcmd.ensure_remote("origin", fetch, push_url=gitcmd.github_push_url(direct), path=path)
+        changed = gitcmd.ensure_remote("origin", fetch, push_url=gitcmd.github_push_url(direct, path), path=path)
         console.info(f"远程: {info['owner']}/{info['repo']}"
                      + (" [拉取加速]" if prefix else "")
                      + (" (已更新)" if changed else ""))
@@ -59,7 +59,7 @@ def do_push(path: str = ".", message: str = "", force: bool = False,
     console.step("正在推送 (推送走直连, 不走加速)...")
     if not gitcmd.push(path, "origin", branch, force=force):
         # 推送失败时先同步远端跟踪引用, 才能准确判断是"远端领先"还是网络问题
-        gitcmd.fetch(path)
+        gitcmd.fetch_remote(path, prefix=prefix)
         behind, _ahead = gitcmd.behind_ahead(path)
         if behind > 0:
             console.error(f"推送失败: 远端有 {behind} 个新提交\n"

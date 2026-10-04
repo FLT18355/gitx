@@ -5,6 +5,7 @@
 
     gitx status / gitx log --oneline / gitx git <任意 git 命令>   -> 直接 exec git
     gitx -V / --version                                        -> 直接打印版本
+    gitx help / -h / --install-completion / --show-completion  -> 交给 typer (帮助 / 补全)
     gitx 自己的子命令 (含 branch / switch / stash / tag 等)       -> 交给 cli.py
     其余 (typer 子命令 / GitHub 链接)                            -> 交给 cli.py
 
@@ -66,7 +67,11 @@ def handle(argv: list[str]) -> tuple[int | None, list[str]]:
         return 0, argv
     if first == "git":  # 显式透传: gitx git init --bare
         return _run_git(argv[1:]), argv
-    if first in ("-h", "--help", "help") or first in SUBCOMMANDS:
+    if first == "help":  # gitx help [子命令] -> 显示帮助, 别交给 git
+        return None, ([*argv[1:], "--help"] if len(argv) > 1 else ["--help"])
+    if first in ("-h", "--help", "--install-completion", "--show-completion"):
+        return None, argv
+    if first in SUBCOMMANDS:
         return None, argv
     if is_download(first):
         # GitHub 链接直接下载: 交给 typer 的 download 命令 (选项原样保留)

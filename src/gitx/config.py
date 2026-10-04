@@ -57,17 +57,19 @@ def release_source(cfg: dict | None = None) -> str:
     return str(data.get("release_proxy") or "")
 
 
-def active_proxy(flag: str | None = None, no_proxy: bool = False, *, release: bool = False) -> str | None:
+def active_proxy(flag: str | None = None, no_proxy: bool = False, *, release: bool = False,
+                 cfg: dict | None = None) -> str | None:
     """返回本次生效的加速前缀; None = 直连.
 
     优先级:
       普通操作: --proxy > GITX_PROXY > 配置 proxy
       Release:  --proxy > GITX_RELEASE_PROXY > 配置 release_proxy > GITX_PROXY > 配置 proxy
     release_proxy 为空 = 跟随全局, 因此不设置时行为与旧版完全一致.
+    cfg 已加载时传入可省一次磁盘读取.
     """
     if no_proxy:
         return None
-    data = load()
+    data = load() if cfg is None else cfg
     if release:
         name = (flag or os.environ.get("GITX_RELEASE_PROXY")
                 or release_source(data)

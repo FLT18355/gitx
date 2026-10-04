@@ -65,6 +65,19 @@ def run_capture(args: Sequence[str]) -> tuple[int, str]:
     return r.returncode, (r.stderr or "").strip() or (r.stdout or "").strip()
 
 
+def capture_raw(args: Sequence[str]) -> tuple[int, str]:
+    """跑命令并原样返回 stdout (不做 strip) —— 行首空格是列位, 不能被吃掉.
+
+    `git status --porcelain` 的首行若为 ' M path' (未暂存修改), strip() 会把
+    X 列的 ' ' 删掉, 使整行错位成 'M path' 而被算作"已暂存"; 图形日志同理。
+    """
+    try:
+        r = subprocess.run([str(a) for a in args], capture_output=True, text=True)
+    except FileNotFoundError:
+        return 127, ""
+    return r.returncode, r.stdout or ""
+
+
 def is_repo(path: str = ".") -> bool:
     return capture(["git", "-C", path, "rev-parse", "--is-inside-work-tree"])[0] == 0
 
@@ -156,7 +169,7 @@ def commit_brief(ref: str = "HEAD", path: str = ".") -> str:
 
 def status_counts(path: str = ".") -> tuple[int, int, int, int]:
     """返回 (已暂存, 已修改, 未跟踪, 冲突)."""
-    rc, out = capture(["git", "-C", path, "status", "--porcelain"])
+    rc, out = capture_raw(["git", "-C", path, "status", "--porcelain"])
     if rc != 0:
         return 0, 0, 0, 0
     staged = modified = untracked = conflicts = 0
@@ -177,11 +190,6 @@ def status_counts(path: str = ".") -> tuple[int, int, int, int]:
     return staged, modified, untracked, conflicts
 
 
-def fetch(path: str = ".", remote: str = "origin") -> bool:
-    """更新远端跟踪引用 (用于判断领先/落后, 直连)."""
-    return fetch_remote(path, remote)
-
-
 def has_upstream(path: str = ".") -> bool:
     return capture(["git", "-C", path, "rev-parse", "--abbrev-ref", "@{upstream}"])[0] == 0
 
@@ -198,8 +206,11 @@ def local_branch_exists(name: str, path: str = ".") -> bool:
                     f"refs/heads/{name}"])[0] == 0
 
 
-def remote_branch_exists(remote: str, branch: str, path: str = ".") -> bool:
-    rc, out = capture(["git", "-C", path, "ls-remote", "--heads", remote, branch])
+def remote_branch_exists(remote: str, branch: str, path: str = ".",
+                         prefix: str | None = None) -> bool:
+    """远端是否存在该分支; prefix 非空时走加速 (ls-remote 也是一次网络请求)."""
+    rc, out = capture(["git", "-C", path, *proxy_args(prefix),
+                       "ls-remote", "--heads", remote, branch])
     return rc == 0 and bool(out)
 
 
@@ -254,50 +265,31 @@ def commit_all(message: str, path: str = ".") -> bool:
     return subprocess.run(["git", "-C", path, "commit", "-m", message]).returncode == 0
 
 
-def _github_rewrite_prefix() -> str:
-    """全局 insteadOf 规则里把 https://github.com/ 重写的加速前缀; 无则空串."""
-    rc, out = capture(["git", "config", "--global", "--get-regexp", r"url\..*insteadOf"])
-    if rc != 0:
-        return ""
-    for line in out.splitlines():
-        parts = line.split(" ", 1)
-        if len(parts) != 2:
-            continue
-        key, value = parts
-        if value != "https://github.com/":
-            continue
-        inner = key[len("url."):].lower()
-        suffix = "/https://github.com/.insteadof"
-        if inner.endswith(suffix):
-            return inner[: -len(suffix)]
-    return ""
-
-
-def github_push_url(url: str) -> str:
+def github_push_url(url: str, path: str = "") -> str:
     """给定 GitHub 地址, 返回推送地址.
 
-    存在全局加速规则时返回 SSH 地址: 规则会把 https 推送也重写到
+    存在 URL 重写规则时返回 SSH 地址: 规则会把 https 推送也重写到
     不支持推送的镜像(405), 而 SSH 不受影响(gh 已配置密钥).
-    无规则时返回直连 https.
+    无规则时返回直连 https. path 非空时按该仓库的合并配置判断。
     """
     m = re.search(r"https://github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$", url)
     if not m:
         return url
     owner, repo = m.group(1), m.group(2)
-    if _github_rewrite_prefix():
+    if accel.installed_prefix(path=path):
         return f"git@github.com:{owner}/{repo}.git"
     return f"https://github.com/{owner}/{repo}.git"
 
 
 def _push_override(path: str, remote: str) -> str | None:
-    """全局加速规则会把推送也重写到镜像(镜像不支持推送, 405).
+    """URL 重写规则会把推送也重写到镜像(镜像不支持推送, 405).
 
     检测到这种情况时, 为本次推送临时改用 SSH 地址直连, 返回 -c 参数.
     """
     fetch = remote_url(remote, path)
     # fetch 可能是带加速前缀的地址, 用 search 提取末尾的 github 仓库路径
     m = re.search(r"https://github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$", fetch)
-    if not m or not _github_rewrite_prefix():
+    if not m or not accel.installed_prefix(path=path):
         return None
     owner, repo = m.group(1), m.group(2)
     return f"remote.{remote}.pushurl=git@github.com:{owner}/{repo}.git"
@@ -368,6 +360,16 @@ def refspec_push(path: str, remote: str, refs: Sequence[str] = (), *,
     return run_capture(args)
 
 
+def delete_remote_ref(path: str, remote: str, ref: str) -> tuple[int, str]:
+    """删除远端引用 (分支 / 标签); 同样要绕过 insteadOf 把推送重写到镜像."""
+    args = ["git", "-C", path]
+    override = _push_override(path, remote)
+    if override:
+        args += ["-c", override]
+    args += ["push", remote, f":{ref}"]
+    return run_capture(args)
+
+
 def pull(path: str = ".", rebase: bool = False, prefix: str | None = None) -> bool:
     """拉取; prefix 非空时用 -c 临时覆盖 insteadOf 走加速(不改远程 URL)."""
     args = ["git", "-C", path, *proxy_args(prefix), "pull"]
@@ -421,7 +423,7 @@ def graph_lines(limit: int = 15, all_refs: bool = False, path: str = ".") -> lis
             "--color=never", "-n", str(limit)]
     if all_refs:
         args.append("--all")
-    rc, out = capture(args)
+    rc, out = capture_raw(args)
     return out.splitlines() if rc == 0 else []
 
 

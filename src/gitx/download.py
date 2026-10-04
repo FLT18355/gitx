@@ -18,10 +18,19 @@ from . import accel, console, gitcmd, github, net
 def download(url: str, dest: str, prefix: str | None, depth: int = 1, branch: str = "",
              *, archive: bool = False, extract: bool = False, submodules: bool = False,
              resume: bool = True) -> None:
-    """入口: 按 URL 模式分发."""
-    info = github.parse_url(url)
+    """入口: 解析链接后分发 (链接已在调用方解析过时, 直接用 run)."""
+    run(github.parse_url(url), dest, prefix, depth, branch,
+        archive=archive, extract=extract, submodules=submodules, resume=resume)
+
+
+def run(info: dict, dest: str, prefix: str | None, depth: int = 1, branch: str = "",
+        *, archive: bool = False, extract: bool = False, submodules: bool = False,
+        resume: bool = True) -> None:
+    """按已解析的 info 分发 (info 见 github.parse_url)."""
     tag = f" | 分支: {info['branch']}" if info["branch"] else ""
     console.info(f"模式: {info['mode']} | 仓库: {info['owner']}/{info['repo']}{tag}")
+    if info["mode"] in ("release", "asset"):
+        console.error(f"这是发布页链接, 请用: gitx release {info['owner']}/{info['repo']}")
     if info["mode"] == "folder":
         _download_folder(info, dest, prefix, depth, branch)
         return
@@ -81,7 +90,7 @@ def _download_repo(info: dict, dest: str, prefix: str | None, depth: int, branch
         console.info("子模组已一并拉取 (同样走加速)")
     if prefix:
         # 镜像不支持推送: 推送地址走 SSH(有全局加速规则时)或直连 https
-        push_url = gitcmd.github_push_url(direct_url)
+        push_url = gitcmd.github_push_url(direct_url, dest)
         subprocess.run(
             ["git", "-C", dest, "remote", "set-url", "--push", "origin", push_url],
             check=False,

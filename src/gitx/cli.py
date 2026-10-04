@@ -17,6 +17,7 @@ import sys
 from typing import Annotated, Optional
 
 import typer
+from rich.markup import escape
 
 from . import (__version__, accel, branch, config, console, download, gitcmd, github, hub,
                release, repo, stash, sync, tag)
@@ -66,7 +67,8 @@ app = typer.Typer(
     help=_HELP,
     epilog=_EPILOG,
     rich_markup_mode="rich",
-    no_args_is_help=True,
+    no_args_is_help=False,  # 空参数走 _welcome: 状态 + 常用命令速查, 而不是全量帮助
+    invoke_without_command=True,  # 无子命令时也要进 callback (否则 click 直接报错)
     add_completion=True,
     context_settings={"help_option_names": ["-h", "--help"]},
 )
@@ -78,12 +80,52 @@ def _version_callback(value: bool) -> None:
         raise typer.Exit()
 
 
+# 只输入 gitx 时的速查表: (命令示例, 一句话说明)
+_WELCOME_TIPS: tuple[tuple[str, str], ...] = (
+    ("gitx <GitHub 链接>", "下载仓库 / 文件夹 / 文件 / 源码包 (默认加速)"),
+    ("gitx release owner/repo", "交互式挑选并下载 Release 附件"),
+    ("gitx sync", "先拉取再推送, 一步完成日常同步 (默认变基)"),
+    ("gitx push / gitx pull", "提交并推送 / 拉取远端更新"),
+    ("gitx info", "仓库概览: 状态 / 领先落后 / 最近提交"),
+    ("gitx branch", "分支表; 切换 switch / 合并 merge / 变基 rebase"),
+    ("gitx stash / gitx tag", "暂存与标签的保存 / 查看 / 恢复"),
+    ("gitx commit -m / gitx diff", "提交改动 / 查看上色 diff"),
+    ("gitx search <关键词>", "搜索 GitHub 仓库 (加 -d 直接下载)"),
+    ("gitx stat owner/repo", "仓库信息: star / 语言 / 贡献者 / 最新发布"),
+    ("gitx proxy auto", "实测测速, 自动选用最快的加速源"),
+    ("gitx -h", "查看全部命令与选项"),
+)
+
+
+def _welcome() -> None:
+    """只输入 `gitx` 时的输出: 版本 + 加速状态 + 常用命令速查 (全量帮助见 `gitx -h`)."""
+    cfg = config.load()
+    name = str(cfg.get("proxy", "v6"))
+    prefix = _resolvable(name)
+    pull = f"{name} ({prefix})" if prefix else f"{name} (直连, 未加速)"
+    console.print(console.styled(
+        f"[key]gitx[/key] [dim]v{__version__}[/dim]   "
+        "[dim]给中国人用的 GitHub 加速与同步工具[/dim]"))
+    console.print(console.styled(f"[dim]拉取[/dim] {escape(pull)} "
+                                 "[dim]· 推送直连 GitHub[/dim]"))
+    console.print()
+    tips = console.table("常用命令", "说明", title="快速上手")
+    for cmd, desc in _WELCOME_TIPS:
+        tips.add_row(console.txt(cmd), console.txt(desc))
+    console.print(tips)
+    console.info("环境自检: gitx doctor   |   其它词透传 git: gitx status / gitx log --oneline")
+
+
 @app.callback()
 def _root(
+    ctx: typer.Context,
     version: Annotated[bool, typer.Option("--version", "-V", callback=_version_callback,
                                           is_eager=True, help="显示版本并退出")] = False,
 ) -> None:
-    # 无子命令时由 no_args_is_help 显示帮助
+    # 无子命令 = 欢迎页 (no_args_is_help 关闭后由这里接管)
+    if ctx.invoked_subcommand is None:
+        _welcome()
+        raise typer.Exit()
     del version
 
 
@@ -1079,6 +1121,7 @@ def _config_list() -> None:
 @app.command(rich_help_panel=PANEL_CONF)
 def doctor() -> None:
     """环境自检: git / gh / 仓库 / 加速源 / 编码."""
+    cfg = config.load()
     table = console.table("项目", "状态", title=f"gitx {__version__} 环境自检")
     table.add_row("配置文件", console.txt(config.config_path()))
     _, gitver = gitcmd.capture(["git", "--version"])
@@ -1088,8 +1131,9 @@ def doctor() -> None:
     gh = shutil.which("gh")
     state = ("已登录" if gitcmd.capture(["gh", "auth", "status"])[0] == 0 else "未登录") if gh else "未安装"
     table.add_row("gh", console.txt(state))
+    token = str(cfg.get("token") or "")
     table.add_row("API token", console.txt(
-        f"已配置 ({_mask('token', config.load().get('token'))})" if config.load().get("token")
+        f"已配置 ({_mask('token', token)})" if token
         else ("复用 gh 的 token" if state == "已登录" else "未配置 (匿名限额 60 次/小时)")))
     table.add_row("缓存", console.txt(str(config.cache_dir())))
     if gitcmd.is_repo():
@@ -1141,9 +1185,12 @@ def _do_download(url: str, dest: Optional[str], depth: Optional[int], branch: st
     target = dest or item_name
     _clear_dest(target)
     if depth is None:
-        depth = int(config.load().get("depth", 1))
-    download.download(url, target, prefix, depth, branch,
-                      archive=archive, extract=extract, submodules=submodules, resume=not fresh)
+        try:
+            depth = int(config.load().get("depth", 1))
+        except (TypeError, ValueError):  # 配置被手改成非法值时退回默认
+            depth = 1
+    download.run(info, target, prefix, depth, branch,
+                 archive=archive, extract=extract, submodules=submodules, resume=not fresh)
 
 
 def main(argv: list[str] | None = None) -> None:

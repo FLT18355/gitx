@@ -1,6 +1,6 @@
 ---
 name: gitx
-version: 1.0.1
+version: 1.0.2
 description: 给中国人用的 GitHub 加速与同步工具 —— 下载 / 同步 / 加速 / 分支 / 暂存 / 标签 / 提交 / 改动
 author: FLT18355
 repository: https://github.com/FLT18355/gitx
@@ -21,10 +21,10 @@ cd gitx
 uv tool install .
 
 # 方式 2：从 Release 附件安装（wheel）
-uv tool install gitx-1.0.1-py3-none-any.whl
+uv tool install gitx-1.0.2-py3-none-any.whl
 
 # 验证
-gitx --version      # 应输出 gitx 1.0.1
+gitx --version      # 应输出 gitx 1.0.2
 gitx doctor         # 环境自检
 ```
 
@@ -35,6 +35,8 @@ gitx doctor         # 环境自检
   克隆 / 同步 / 搜索等照旧走全局加速源（`gitx proxy release on v4|off|follow`）
 - **四个加速源可选**：v6 / v4（IPv4 端点）/ gh-proxy / 自定义 URL，`gitx proxy auto` 实测选最快
 - **Typer + Rich** 构建分组式 CLI：彩色表格、下载进度条（速率 / 剩余时间）
+- **Catppuccin Mocha 主题**：表格 / 面板 / 进度条 / 选择器统一取自官方调色板
+- **只输入 `gitx`** 显示版本 + 加速状态 + 常用命令速查（全量帮助见 `gitx -h`）
 - **交互式挑选**用 questionary：上下键选择、最多渲染 5 行、打字即筛选
 - **git 透传不加载 typer**：`gitx status` / `gitx log --oneline` 几乎瞬时完成
 - **断点续传**：中断的下载留下 `.part`，重跑自动续传

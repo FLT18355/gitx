@@ -75,7 +75,6 @@ def probe(prefix: str | None, timeout: int = 20) -> tuple[float, bool]:
     prefix=None 表示直连; 用真实 git 请求而不是 HTTP 状态码, 结果才可信.
     """
     import os
-    import subprocess
     import time
 
     url = wrap("https://github.com/octocat/Hello-World.git", prefix)
@@ -91,10 +90,22 @@ def probe(prefix: str | None, timeout: int = 20) -> tuple[float, bool]:
     return (time.perf_counter() - start) * 1000, ok
 
 
-def installed_prefix() -> str:
-    """从 git 全局配置探测已安装的加速前缀; 无则返回空串."""
-    rc, out = _git_config_get_regexp(scope="--global", pattern=r"url\..*insteadOf")
-    if rc != 0 or not out:
+def installed_prefix(scope: str | None = None, path: str = "") -> str:
+    """从 git 配置里探测 URL 重写规则中的加速前缀; 无则返回空串.
+
+    scope=None 读取合并后的配置 (含仓库本地规则), "--global" 只读全局;
+    path 非空时在该仓库内读取 (可发现 `gitx proxy install --local` 写的规则)。
+    """
+    args = ["git"]
+    if path:
+        args += ["-C", path]
+    args += ["config"]
+    if scope:
+        args += [scope]
+    args += ["--get-regexp", r"url\..*insteadOf"]
+    r = subprocess.run(args, capture_output=True, text=True)
+    out = (r.stdout or "").strip()
+    if r.returncode != 0 or not out:
         return ""
     for line in out.splitlines():
         key = line.split()[0]
@@ -108,8 +119,3 @@ def installed_prefix() -> str:
             if inner.endswith(suffix):
                 return inner[: -len(suffix)]
     return ""
-
-
-def _git_config_get_regexp(scope: str, pattern: str) -> tuple[int, str]:
-    r = subprocess.run(["git", "config", scope, "--get-regexp", pattern], capture_output=True, text=True)
-    return r.returncode, (r.stdout or "").strip()

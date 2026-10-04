@@ -281,7 +281,6 @@ def _render(data: dict, owner: str, repo: str, extra: dict) -> None:
 
     topics = [str(t) for t in (data.get("topics") or [])]
     table = console.table("项目", "值", title="仓库")
-    table.add_row("描述", console.txt(desc or "-"))
     table.add_row("主页", console.txt(data.get("homepage") or "-"))
     table.add_row("标签", console.txt(f"{len(topics)} 个: {', '.join(topics)}" if topics else "无"))
     table.add_row("语言", console.txt(data.get("language") or "-"))

@@ -96,13 +96,13 @@ def info(path: str = ".") -> None:
     else:
         track = f"领先 {ahead} | 落后 {behind}" + ("   先 gitx pull 再推送" if behind else "")
 
-    prefix = config.active_proxy()
     cfg = config.load()
+    prefix = config.active_proxy(cfg=cfg)
     speed = (f"{cfg.get('proxy')} ({prefix}) [拉取加速 / 推送直连]"
              if prefix else "直连")
     rel_raw = config.release_source(cfg)
     if rel_raw:
-        rel_prefix = config.active_proxy(release=True)
+        rel_prefix = config.active_proxy(release=True, cfg=cfg)
         speed += f" | Release: {rel_raw} ({rel_prefix})" if rel_prefix else f" | Release: {rel_raw} (直连)"
 
     repo_table = console.table("项目", "值", title="仓库")
@@ -172,7 +172,7 @@ def _ref_style(ref: str) -> str:
     if ref.startswith("tag: "):
         return "tag"
     if ref.startswith("HEAD"):
-        return "bold magenta" if ref == "HEAD" else "branch"
+        return "head" if ref == "HEAD" else "branch"
     if "/" in ref:  # origin/main 之类的远端跟踪分支
         return "date"
     return "branch"
@@ -214,7 +214,7 @@ def graph(limit: int = 15, all_refs: bool = False, path: str = ".") -> None:
         body.append_text(_color_line(line))
     name = os.path.basename(os.path.abspath(path))
     console.panel(body, title=f"{name} 最近 {len(lines)} 次提交"
-                             + (" (全部引用)" if all_refs else ""), border="cyan")
+                             + (" (全部引用)" if all_refs else ""))
     console.info(f"更多: gitx graph -n 50 | gitx graph --all | gitx log --oneline (原生 git)")
 
 
@@ -302,7 +302,7 @@ def url(path: str = ".", transport: str = "", remote: str = "origin") -> None:
         if not prefix:
             console.error("当前是直连模式, 先用: gitx proxy on")
         target = accel.wrap(direct, prefix)
-        push_target = gitcmd.github_push_url(direct)
+        push_target = gitcmd.github_push_url(direct, path)
     if not gitcmd.set_remote_urls(remote, target, push_target, path):
         console.error("切换失败, 请检查远程名与地址")
     console.done(f"{remote} 已切换为 {transport}: 拉取 {target}"
@@ -313,6 +313,8 @@ def _transport_label(fetch: str, push: str) -> str:
     """按地址形态给出人话标签."""
     if fetch.startswith("git@"):
         return "[tag]ssh[/tag]"
+    if "github.com" not in fetch:
+        return "[dim]非 GitHub 远端[/dim]"
     if fetch.startswith("https://github.com/"):
         return "[ok]https 直连[/ok]"
     return f"[num]加速[/num] {push.startswith('git@') and '(推送走 ssh)' or ''}".strip()

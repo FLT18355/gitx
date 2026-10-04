@@ -14,6 +14,8 @@
 
 from __future__ import annotations
 
+import subprocess
+
 from . import config, console, gitcmd
 
 
@@ -160,13 +162,15 @@ def delete(names: list[str], *, force: bool = False, remote: bool = False,
     if remote:
         if not gitcmd.remote_url("origin", path):
             console.error("没有 origin 远程 (gitx push to <仓库地址> 关联)")
+        prefix = config.active_proxy()
         for name in names:
-            if not gitcmd.remote_branch_exists("origin", name, path):
+            if not gitcmd.remote_branch_exists("origin", name, path, prefix):
                 console.warn(f"远端没有分支: origin/{name}")
                 continue
             console.step(f"删除远端分支 origin/{name}...")
-            if not gitcmd.ok(["git", "-C", path, "push", "origin", "--delete", name]):
-                console.error(f"删除失败: origin/{name} (受保护分支或网络问题)")
+            rc, out = gitcmd.delete_remote_ref(path, "origin", f"refs/heads/{name}")
+            if rc != 0:
+                console.error(f"删除失败: origin/{name} (受保护分支或网络问题)\n{out}")
             console.done(f"已删除远端分支: origin/{name}")
         return
 
@@ -308,8 +312,6 @@ def rebase(onto: str = "", *, interactive: bool = False, abort: bool = False,
 
 def subprocess_run(args: list[str]) -> int:
     """继承终端的运行 (交互式命令如 rebase -i 需要真终端)."""
-    import subprocess
-
     try:
         return subprocess.run(args).returncode
     except FileNotFoundError:

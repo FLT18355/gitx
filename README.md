@@ -19,13 +19,6 @@
 > `gitx stash` 列表不再显示 git 的 `On <分支>: ` 前缀; `gitx web` 对未知页面给出提示而非静默开首页;
 > `gitx url` / `gitx proxy` 检测 insteadOf 规则时不再吞掉自定义加速源的大小写; 并清掉三处死代码。
 
-> **v1.0.2: Catppuccin Mocha 主题 + 欢迎页 + 修复** ——
-> 终端配色统一为 **Catppuccin Mocha**(表格 / 面板 / 进度条 / 交互选择器同源取色, 见 `console.py` 的 `MOCHA`);
-> 只输入 `gitx` 不再刷一屏帮助, 改成版本 + 加速状态 + 常用命令速查(全量帮助仍在 `gitx -h`);
-> `gitx help [命令]` / `--install-completion` / `--show-completion` 交给 typer 正确处理;
-> 修复 `git status --porcelain` 首行被 `strip()` 吃掉行首空格 → 未暂存改动被误判为"已暂存"的统计错位,
-> 并让 `--local` 的 insteadOf 规则也能在推送时被检测到(自动改用 SSH 直连, 避免被镜像 405 拒绝)。
-
 默认走加速镜像 `https://v6.gh-proxy.org` 拉取, 推送直连 GitHub(镜像不支持推送)。
 
 命令行用 **Typer + Rich** 构建: 分组式帮助、彩色表格、下载进度条(速率 / 剩余时间),

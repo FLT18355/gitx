@@ -187,9 +187,10 @@ def release_cmd(
     """
     info = release.parse_target(target)
     prefix = config.active_proxy(proxy, no_proxy, release=True)
-    release.run(info, output, prefix, tag=tag, assets=tuple(assets or ()),
+    out_dir = output or config.default_dest() or "."
+    release.run(info, out_dir, prefix, tag=tag, assets=tuple(assets or ()),
                 list_only=list_only, tags=tags, pick=pick, source=source, limit=limit,
-                resume=not refresh)
+                resume=not refresh and bool(config.load().get("resume", True)))
 
 
 # ================================================================ 同步
@@ -1037,7 +1038,7 @@ def _proxy_uninstall(local: bool) -> None:
 
 # ================================================================ 配置
 
-config_app = typer.Typer(help="持久化配置 (~/.config/gitx/config.json)", rich_markup_mode="rich",
+config_app = typer.Typer(help="持久化配置 (~/.config/gitx/config.toml, 带注释可手改)", rich_markup_mode="rich",
                          invoke_without_command=True, context_settings={"help_option_names": ["-h", "--help"]})
 
 
@@ -1066,16 +1067,11 @@ def config_set(
     key: Annotated[str, typer.Argument(metavar="键", help=_CFG_KEYS)],
     value: Annotated[str, typer.Argument(metavar="值")],
 ) -> None:
-    """修改配置项."""
-    if key not in config.DEFAULTS:
-        console.error(f"未知配置键: {key} (可用: {', '.join(config.DEFAULTS)})")
-    if key in ("proxy", "release_proxy"):
-        accel.resolve(value)
-    if key == "depth":
-        try:
-            int(value)
-        except ValueError:
-            console.error("depth 必须是整数")
+    """修改配置项 (bool 接受 true/false/yes/no; 加速源会校验合法性)."""
+    try:
+        value = config.normalize(key, value)
+    except ValueError as exc:
+        console.error(str(exc))
     config.save({**config.load(), key: value})
     console.done(f"{key} = {_mask(key, value)}")
 
@@ -1086,6 +1082,22 @@ def config_reset() -> None:
     config.save(dict(config.DEFAULTS))
     console.done("配置已重置为默认")
 
+
+
+@config_app.command("path")
+def config_path_cmd() -> None:
+    """打印配置文件路径."""
+    console.info(str(config.config_path()))
+
+
+@config_app.command("edit")
+def config_edit() -> None:
+    """用 $VISUAL / $EDITOR 打开配置文件 (首次运行会生成带注释的模板)."""
+    import shlex  # noqa: PLC0415
+
+    config.ensure_file()
+    editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi"
+    subprocess.run([*shlex.split(editor), str(config.config_path())])
 
 @config_app.command("zh")
 def config_zh(
@@ -1111,11 +1123,12 @@ def _mask(key: str, value: object) -> str:
 
 
 def _config_list() -> None:
+    config.ensure_file()  # 首次运行就生成带注释的 TOML, 让用户有东西可看
     table = console.table("键", "值", title="gitx 配置")
     for key, value in config.load().items():
         table.add_row(console.txt(key), console.txt(_mask(key, value)))
     console.print(table)
-    console.info(f"配置文件: {config.config_path()}")
+    console.info(f"配置文件: {config.config_path()}   (直接编辑: gitx config edit)")
 
 
 @app.command(rich_help_panel=PANEL_CONF)
@@ -1174,23 +1187,24 @@ def _do_download(url: str, dest: Optional[str], depth: Optional[int], branch: st
         info = github.parse_url(url)
     except ValueError as exc:
         console.error(f"{exc}\n提示: 其它 git 子命令可直接透传, 如 gitx status")
-    prefix = config.active_proxy(proxy, no_proxy, release=info["mode"] in ("release", "asset"))
+    cfg = config.load()
+    base = config.default_dest()  # 配置里的默认下载目录 (展开 ~), 留空 = 当前目录
+    prefix = config.active_proxy(proxy, no_proxy, cfg=cfg, release=info["mode"] in ("release", "asset"))
     if info["mode"] in ("release", "asset"):
-        release.run(info, dest or ".", prefix, assets=tuple(assets or ()),
-                    list_only=list_only, source=source, limit=limit, resume=not fresh)
+        release.run(info, dest or base or ".", prefix, assets=tuple(assets or ()),
+                    list_only=list_only, source=source, limit=limit,
+                    resume=not fresh and bool(cfg.get("resume", True)))
         return
     if archive and info["mode"] != "repo":
         console.error("--archive 只对仓库链接有效 (文件夹/单个文件请直接下载)")
     item_name = os.path.basename(info["path"]) if info["path"] else info["repo"]
-    target = dest or item_name
+    target = dest or (os.path.join(base, item_name) if base else item_name)
     _clear_dest(target)
     if depth is None:
-        try:
-            depth = int(config.load().get("depth", 1))
-        except (TypeError, ValueError):  # 配置被手改成非法值时退回默认
-            depth = 1
+        depth = int(cfg.get("depth", 1) or 1)
     download.run(info, target, prefix, depth, branch,
-                 archive=archive, extract=extract, submodules=submodules, resume=not fresh)
+                 archive=archive, extract=extract, submodules=submodules,
+                 resume=not fresh and bool(cfg.get("resume", True)))
 
 
 def main(argv: list[str] | None = None) -> None:

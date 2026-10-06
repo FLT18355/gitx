@@ -61,6 +61,27 @@ console = Console(theme=THEME, highlight=False)
 err_console = Console(theme=THEME, stderr=True, highlight=False)
 
 
+
+def apply_color(mode: str) -> None:
+    """按配置 color 调整彩色输出: never 关闭颜色 (auto = 用 Rich 的自动检测).
+
+    影响的是 gitx 自己的输出; help / typer 的错误页由 typer 渲染, 不受此影响。
+    想强制彩色可设环境变量 FORCE_COLOR=1 (Rich 原生支持); 关闭则 NO_COLOR=1。
+    """
+    if str(mode).strip().lower() == "never":
+        console.no_color = True
+        err_console.no_color = True
+    elif str(mode).strip().lower() == "auto":
+        console.no_color = False
+        err_console.no_color = False
+
+
+def _assume_yes() -> bool:
+    """配置 assume_yes=true 时所有确认一律视为同意 (= 处处 -y)."""
+    from . import config  # 延迟导入: config 依赖 console, 避免循环导入
+
+    return bool(config.load().get("assume_yes"))
+
 def txt(value: Any) -> Text:
     """把任意值变成不做 markup 解析的 Text (表格 / 面板里放动态内容时用)."""
     return Text(str(value))
@@ -140,7 +161,13 @@ def human_size(n: float) -> str:
 
 
 def ask(question: str, default: bool | None = None) -> bool:
-    """询问 y/n; 非交互环境使用 default(没有 default 视为 False)."""
+    """询问 y/n; 非交互环境使用 default(没有 default 视为 False).
+
+    配置 assume_yes=true 时一律视为同意 (= 处处 -y), 跳过所有确认;
+    非交互(管道/脚本)且未开 assume_yes 时仍按 default 走。
+    """
+    if _assume_yes():
+        return True
     if not sys.stdin.isatty():
         return bool(default)
     hint_text = " [Y/n] " if default is True else " [y/N] " if default is False else " [y/n] "

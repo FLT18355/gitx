@@ -238,8 +238,9 @@ def sync_cmd(
     no_proxy: Annotated[bool, typer.Option("--no-proxy", help="本次直连")] = False,
 ) -> None:
     """先拉取再推送, 一步完成日常同步 (默认变基)."""
+    rebase = False if merge else bool(config.load().get("sync_rebase", True))
     sync.do_sync(path=path, message=message or " ".join(words or []), force=force,
-                 no_proxy=no_proxy, rebase=not merge)
+                 no_proxy=no_proxy, rebase=rebase)
 
 
 # ================================================================ 仓库
@@ -744,7 +745,7 @@ def release_proxy_on(
     source: Annotated[str, typer.Argument(metavar="加速源", help="v6 / v4 / gh-proxy / https://...")] = "v6",
 ) -> None:
     """开启 Release 独立加速 (默认 v6), 其它功能照旧."""
-    accel.resolve(source)
+    source = _checked_source("release_proxy", source)
     config.save({**config.load(), "release_proxy": source})
     console.done(f"Release 已独立加速: {source} ({accel.resolve(source)})")
 
@@ -768,7 +769,7 @@ def release_proxy_set(
     source: Annotated[str, typer.Argument(metavar="加速源", help="v6 / v4 / gh-proxy / https://...")],
 ) -> None:
     """设置 Release 专用加速源."""
-    accel.resolve(source)
+    source = _checked_source("release_proxy", source)
     config.save({**config.load(), "release_proxy": source})
     console.done(f"Release 加速源已设为: {source}")
 
@@ -906,6 +907,14 @@ def _resolvable(name: str) -> str | None:
         return accel.resolve(name)
     except ValueError:
         return None
+
+
+def _checked_source(key: str, source: str) -> str:
+    """校验加速源后返回; 非法值给中文提示并退出 (而不是抛栈)."""
+    try:
+        return str(config.normalize(key, source))
+    except ValueError as exc:
+        console.error(str(exc))
 
 
 def _proxy_status() -> None:
@@ -1209,6 +1218,7 @@ def _do_download(url: str, dest: Optional[str], depth: Optional[int], branch: st
 
 def main(argv: list[str] | None = None) -> None:
     """typer 应用入口 (git 透传 / --version 的快速通道见 dispatch.handle)."""
+    console.apply_color(str(config.load().get("color", "auto")))
     app(list(sys.argv[1:] if argv is None else argv))
 
 

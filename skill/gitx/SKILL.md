@@ -21,10 +21,10 @@ cd gitx
 uv tool install .
 
 # 方式 2：从 Release 附件安装（wheel）
-uv tool install gitx-1.0.3-py3-none-any.whl
+uv tool install gitx-x.x.x-py3-none-any.whl
 
 # 验证
-gitx --version      # 应输出 gitx 1.0.3
+gitx --version
 gitx doctor         # 环境自检
 ```
 

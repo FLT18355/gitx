@@ -17,17 +17,6 @@
 > 修复 `git status --porcelain` 首行被 `strip()` 吃掉行首空格 → 未暂存改动被误判为"已暂存"的统计错位,
 > 并让 `--local` 的 insteadOf 规则也能在推送时被检测到(自动改用 SSH 直连, 避免被镜像 405 拒绝)。
 
-> **v1.0.1: Release 加速可独立设置** —— 新增配置键 `release_proxy` 与 `gitx proxy release`:
-> Release 附件与发布列表 (API) 可以单独走某个加速源、单独直连, 或者跟随全局;
-> 克隆 / 同步 / 搜索等其它功能不受影响。同时新增 IPv4 加速源 `v4` (`https://v4.gh-proxy.org`),
-> `gitx proxy auto` 会把它一起纳入测速 (`gitx proxy on v4` / `gitx proxy release on v4`)。
-
-
-> v1.0.0: 1.0 正式版 —— 补齐日常 git 操作, 从"加速下载工具"变成"日常用得上"的命令行:
-> 分支 (`branch` / `switch` / `merge` / `rebase` / `fetch`)、暂存 (`stash`)、标签 (`tag`)、
-> 提交 (`commit`)、改动查看与回退 (`diff` / `discard` / `clean`);
-> 内部统一了前置检查与推送直连逻辑。每个 Release 同时提供**源码包**与 **uv 构建的 wheel**。
-
 默认走加速镜像 `https://v6.gh-proxy.org` 拉取, 推送直连 GitHub(镜像不支持推送)。
 
 命令行用 **Typer + Rich** 构建: 分组式帮助、彩色表格、下载进度条(速率 / 剩余时间),
@@ -45,7 +34,7 @@ uv run gitx -h   # 或: uv run python -m gitx --help
 或者从 Release 附件安装 (每个版本都提供**源码包**与 **uv 构建的 wheel** 两个文件):
 
 ```bash
-uv tool install gitx-1.0.3-py3-none-any.whl    # 或: uv tool install .
+uv tool install gitx-x.x.x-py3-none-any.whl    # 或: uv tool install .
 ```
 
 ## 用法

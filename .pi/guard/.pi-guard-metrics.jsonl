@@ -1,0 +1,2 @@
+{"kind":"bash_guard","toolName":"bash","outcome":"prompt_allow","severity":"high","reasons":"rm (file deletion); recursive delete (-r/-R)","ts":1791277401010}
+{"kind":"enrich","matched":false,"toolName":"bash","ts":1791277401141}

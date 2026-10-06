@@ -2,6 +2,9 @@
 
 给中国人用的 GitHub 加速与同步工具 —— 下载 / 同步 / 加速, 一条命令搞定。
 
+> **v1.0.5 (pre-release): Skill 优化** ——
+> 优化 skill 文件结构，新增表格化命令速查、快速上手指南、常见问题解答，提升 AI agent 集成体验。
+>
 > **v1.0.4: TOML 配置 + 五项新命令** ——
 > 配置文件换成人类可读的 **TOML**(`~/.config/gitx/config.toml`, 逐项中文注释, `gitx config set` 后注释不丢;
 > 旧的 `config.json` 首次运行自动迁移并保留为 `.json.bak`), 新增 `dest` / `resume` / `sync_rebase` /

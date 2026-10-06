@@ -17,7 +17,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh   # Linux/macOS
 git clone https://github.com/FLT18355/gitx.git
 cd gitx
 uv tool install .        # 构建并安装到 uv 的独立 venv, 提供全局 gitx 命令
-gitx --version           # 验证
+gitx --version           # 验证 (预期: gitx 1.0.5)
 ```
 
 安装后可在任意目录直接运行 `gitx`。升级时重新执行 `uv tool install .`（会先卸载旧版）。

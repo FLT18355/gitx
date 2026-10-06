@@ -2,6 +2,15 @@
 
 给中国人用的 GitHub 加速与同步工具 —— 下载 / 同步 / 加速, 一条命令搞定。
 
+> **v1.0.4: TOML 配置 + 五项新命令** ——
+> 配置文件换成人类可读的 **TOML**(`~/.config/gitx/config.toml`, 逐项中文注释, `gitx config set` 后注释不丢;
+> 旧的 `config.json` 首次运行自动迁移并保留为 `.json.bak`), 新增 `dest` / `resume` / `sync_rebase` /
+> `color` / `assume_yes` 五项配置, 并新增 `gitx config edit` / `gitx config path`;
+> 新增 **`gitx upgrade`**(自更新: 查 Release 与下 wheel 都走加速)、**`gitx remote`**(拉取加速 + 推送直连)、
+> **`gitx submodule`**(子模组也走加速)、**`gitx pr`**(列表 / 详情 / 创建)、**`gitx cache`**(缓存查看与清理);
+> `gitx download` 支持一次下多个链接(`-f` 从文件读、`-o` 指定目录); `gitx doctor --fix` 一键修好编码 / pull 策略 / 上游;
+> 修复 `gitx pull` 与 `gitx sync --merge` 在分支分歧时报"需要指定如何调和偏离的分支"、以及 `gitx proxy on <非法源>` 抛完整堆栈的问题。
+
 > **v1.0.3: 链接解析与配置修复** ——
 > 修复 `https://github.com/owner/repo/releases/latest` 这类链接无法识别的问题(此前 `gitx release <该链接>` 会直接抛栈),
 > 现在 `/releases`、`/releases/latest`、`/releases/tag/<标签>`、`/releases/download/...` 都能正确解析;
@@ -49,10 +58,13 @@ gitx https://github.com/owner/repo/tree/分支/路径   # 文件夹 (部分克�
 gitx https://github.com/owner/repo/blob/分支/路径/文件  # 单个文件
 gitx github.com/owner/repo                          # 链接可省略 https://, 效果同上
 gitx clone https://github.com/owner/repo 我的目录   # 等价 download
+gitx download url1 url2 -o 下载目录                  # 批量: 一次下多个链接 (失败的不影响其余)
+gitx download -f 链接.txt -o 下载目录                # 从文本文件读链接 (每行一个, # 注释; - 读标准输入)
 ```
 
 选项: `--no-proxy` 直连, `--proxy gh-proxy` 换加速源, `--branch <分支>`, `--depth <N>`(0 = 完整克隆),
 `--submodules` 连同子模组一起拉取(也走加速), `--fresh` 忽略断点从零下载。
+`-o` 默认是保存路径; 多个链接、或指向已存在的目录(以 `/` 结尾)时按目录处理, 每个仓库各建一个子目录。
 不给 `--branch` 时, 分支按 **URL 内分支 > 配置项 `branch`(`gitx config set branch develop`) > 远端默认分支** 依次决定。
 
 **断点续传**: 中断的下载会留下 `<文件>.part`, 重跑自动带 `Range` 续传, 不用重来。
@@ -230,6 +242,39 @@ gitx tag delete v1.0.0            # 删本地标签
 gitx tag delete v1.0.0 -r         # 连 origin 上的标签一起删
 ```
 
+### 协作与进阶 (远程 / 子模组 / PR / 缓存 / 自更新)
+
+```bash
+gitx remote                             # 列出全部远程 (拉取 / 推送地址)
+gitx remote add upstream https://github.com/owner/repo   # 加远程: 拉取走加速, 推送直连
+gitx remote set-url origin https://github.com/owner/repo # 改地址 (自动同步推送地址)
+gitx remote show upstream / rename / remove             # 查看 / 重命名 / 删除
+# 未知参数仍透传 git: gitx remote -v / gitx remote prune origin
+
+gitx submodule                          # 子模组状态 (提交是否对齐 / 未初始化 / 冲突)
+gitx submodule add https://github.com/owner/repo libs/x  # 添加 (拉取走加速)
+gitx submodule update                   # 拉取子模组 (默认 --init --recursive, 走加速)
+gitx submodule update --remote          # 跟踪子模组远端最新提交
+gitx submodule sync                     # 地址同步成 .gitmodules 的配置
+gitx submodule remove libs/x            # 删除 (含 .gitmodules 条目与本地缓存)
+
+gitx pr                                 # 当前仓库的开放 PR
+gitx pr list cli/cli --state all -n 30  # 任意仓库, 各种状态
+gitx pr view 1234                       # 看某个 PR 的标题 / 状态 / 正文 (--web 顺手打开)
+gitx pr create -t "标题" -b "正文"      # 用已登录的 gh 创建 (--fill 用提交信息, --draft 草稿)
+
+gitx cache                              # 看 ~/.cache/gitx 的内容与占用
+gitx cache clear                        # 清空缓存 (可再生的数据, 下次自动重建)
+
+gitx upgrade                            # 自更新到最新版本 (查 Release 与下 wheel 都走加速)
+gitx upgrade --check                    # 只检查是否有新版本
+```
+
+子模组加速的原理与下载一致: 用 `git -c url.<镜像>/.insteadOf=<原地址>` 让本次命令
+把 github.com 重写到镜像 (规则不落盘)。远程管理则反过来 —— 拉取写加速地址、推送写直连
+(存在 insteadOf 规则时用 SSH), 这样 `gitx remote add` 出来的远程开箱即可用。
+`gitx pr` 的读取走加速 API, 创建交给 `gh` (写入鉴权不经过本工具)。
+
 ### 加速管理
 
 ```bash
@@ -329,6 +374,9 @@ src/gitx/
   tag.py        标签 (list / new / delete / push)
   hub.py        search / stat / web / ignore
   sync.py       push / pull / sync
+  remote.py     远程管理 (拉取加速 + 推送直连)      submodule.py  子模组 (拉取同样走加速)
+  pr.py         Pull Request 列表 / 详情 / 创建      cache.py      缓存查看与清理
+  upgrade.py    自更新 (加速下载 wheel 后 uv/pip 重装)
 ```
 
 ## 开发

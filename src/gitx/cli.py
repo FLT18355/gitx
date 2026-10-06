@@ -19,8 +19,8 @@ from typing import Annotated, Optional
 import typer
 from rich.markup import escape
 
-from . import (__version__, accel, branch, config, console, download, gitcmd, github, hub,
-               release, repo, stash, sync, tag)
+from . import (__version__, accel, branch, cache, config, console, download, gitcmd, github, hub,
+               pr, release, remote, repo, stash, submodule, sync, tag, upgrade)
 
 PANEL_DL = "下载 (默认加速)"
 PANEL_SYNC = "同步"
@@ -28,6 +28,7 @@ PANEL_REPO = "仓库 (提交 / 改动 / 历史)"
 PANEL_BRANCH = "分支 (切换 / 合并 / 变基)"
 PANEL_WIP = "暂存与标签"
 PANEL_HUB = "探索 (搜索 / 网页 / 模板)"
+PANEL_COLLAB = "协作 (PR / 子模组)"
 PANEL_PROXY = "加速管理"
 PANEL_CONF = "配置与自检"
 
@@ -56,6 +57,10 @@ _EPILOG = """[key]示例[/key]
   gitx diff --staged                                看上色后的暂存区改动
   gitx tidy --gc                                    仓库体检 + 打包瘦身
   gitx url accel                                    让 origin 拉取走加速
+  gitx remote add upstream https://github.com/o/r   加远程 (拉取加速, 推送直连)
+  gitx submodule update                             拉取子模组 (同样走加速)
+  gitx pr list                                      看当前仓库的 Pull Request
+  gitx upgrade                                      自更新到最新版本 (走加速)
   gitx proxy auto                                   自动测速并选用最快加速源
   gitx proxy release on gh-proxy                    只给 Release 换加速源 (与其它功能分开)
 
@@ -93,6 +98,9 @@ _WELCOME_TIPS: tuple[tuple[str, str], ...] = (
     ("gitx search <关键词>", "搜索 GitHub 仓库 (加 -d 直接下载)"),
     ("gitx stat owner/repo", "仓库信息: star / 语言 / 贡献者 / 最新发布"),
     ("gitx proxy auto", "实测测速, 自动选用最快的加速源"),
+    ("gitx remote", "查看/添加远程 (拉取加速, 推送直连)"),
+    ("gitx pr / gitx submodule", "PR 列表与详情 / 子模组一条龙 (走加速)"),
+    ("gitx upgrade", "自更新到最新版本 (下载走加速)"),
     ("gitx -h", "查看全部命令与选项"),
 )
 
@@ -133,8 +141,9 @@ def _root(
 
 @app.command("download", rich_help_panel=PANEL_DL)
 def download_cmd(
-    url: Annotated[str, typer.Argument(metavar="URL", help="GitHub 链接: 仓库 / tree / blob / releases")],
-    dest: Annotated[Optional[str], typer.Argument(metavar="目标路径", help="保存位置, 默认用仓库名")] = None,
+    targets: Annotated[Optional[list[str]], typer.Argument(
+        metavar="URL|路径...",
+        help="一个或多个 GitHub 链接; 只给一个链接时, 第二个参数可当保存路径")] = None,
     branch: Annotated[str, typer.Option("--branch", "-b", help="指定分支")] = "",
     depth: Annotated[Optional[int], typer.Option("--depth", "-d", help="克隆深度, 0 = 完整克隆")] = None,
     archive: Annotated[bool, typer.Option("--archive", "-x", "--tarball",
@@ -146,6 +155,8 @@ def download_cmd(
     limit: Annotated[int, typer.Option("--limit", "-n", help="发布列表条数 (发布页链接挑选发布用, 最多 100)")] = release.DEFAULT_LIMIT,
     assets: Annotated[Optional[list[str]], typer.Option("--asset", "-a", help="仅下载匹配的附件, 可重复")] = None,
     source: Annotated[bool, typer.Option("--source", help="额外下载源码包 (发布页链接)")] = False,
+    output: Annotated[Optional[str], typer.Option("--output", "-o", help="保存路径; 多个链接或指向已存在目录 (以 / 结尾) 时作为目录")] = None,
+    links_file: Annotated[str, typer.Option("--file", "-f", help="从文本文件读取链接 (每行一个, # 注释; - 表示标准输入)")] = "",
     proxy: Annotated[Optional[str], typer.Option("--proxy", help="本次使用的加速源: v6 / v4 / gh-proxy / https://...")] = None,
     no_proxy: Annotated[bool, typer.Option("--no-proxy", help="本次直连, 不走加速")] = False,
 ) -> None:
@@ -153,10 +164,25 @@ def download_cmd(
 
     要历史用 [key]git clone[/key] 路线 (浅克隆), 只要文件树用 [key]-x[/key] 源码包路线,
     只要某个目录用 [key]tree[/key] 链接 (部分克隆 + 稀疏检出), 单个文件用 [key]blob[/key] 链接。
+
+    可以一次给多个链接 (逐个下载, 单个失败不影响其余的), 也可以 [key]-f[/key] 从文本文件读;
+    多个链接时 [key]-o[/key] 视为保存目录, 每个仓库各建一个子目录。
     """
-    _do_download(url, dest, depth, branch, proxy, no_proxy,
-                 list_only=list_only, assets=assets, source=source, limit=limit,
-                 archive=archive or extract, extract=extract, submodules=submodules, fresh=fresh)
+    urls = list(targets or [])
+    if links_file:
+        urls += _read_links(links_file)
+    if not urls:
+        console.error("请给出至少一个 GitHub 链接 (或 gitx download <链接...> -f 链接文件)")
+    from .dispatch import is_download  # noqa: PLC0415  仅此处用来区分"链接"和"保存路径"
+
+    dest = output
+    if dest is None and len(urls) >= 2 and not is_download(urls[-1]):
+        dest = urls.pop()
+    if len(urls) == 1 and dest and (os.path.isdir(dest) or dest.endswith(("/", os.sep))):
+        dest = _batch_target(urls[0], dest)  # 目标是目录 / 以斜杠结尾 -> 存进目录, 不覆盖它
+    _do_download_many(urls, dest, depth, branch, proxy, no_proxy,
+                      list_only=list_only, assets=assets, source=source, limit=limit,
+                      archive=archive or extract, extract=extract, submodules=submodules, fresh=fresh)
 
 
 app.command("clone", hidden=True, rich_help_panel=PANEL_DL,
@@ -716,6 +742,213 @@ def ignore(
     hub.ignore(list(names or []), output, force=force, prefix=prefix)
 
 
+# ================================================================ 协作 (远程 / 子模组 / PR)
+
+remote_app = typer.Typer(help="远程管理: 查看 / 添加 / 删除 / 重命名 / 改地址", rich_markup_mode="rich",
+                         invoke_without_command=True, context_settings={"help_option_names": ["-h", "--help"]})
+
+
+@remote_app.callback()
+def _remote_root(ctx: typer.Context) -> None:
+    # 不带子命令 = 列出远程 (gitx remote -v 等未知参数仍透传给 git, 见 dispatch.py)
+    if ctx.invoked_subcommand is None:
+        remote.list_remotes()
+
+
+@remote_app.command("list")
+def remote_list(
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """列出全部远程 (拉取 / 推送地址)."""
+    remote.list_remotes(path)
+
+
+@remote_app.command("add")
+def remote_add(
+    name: Annotated[str, typer.Argument(metavar="远程名", help="如 origin / upstream")],
+    url: Annotated[str, typer.Argument(metavar="地址", help="GitHub 链接或任意 git 地址")],
+    push_url: Annotated[str, typer.Option("--push", help="单独指定推送地址 (默认自动: 直连或 SSH)")] = "",
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """添加远程 (GitHub 地址自动: 拉取走加速, 推送直连)."""
+    remote.add(name, url, push_url=push_url, path=path)
+
+
+@remote_app.command("remove")
+def remote_remove(
+    name: Annotated[str, typer.Argument(metavar="远程名", help="要删除的远程")],
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="跳过确认")] = False,
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """删除远程."""
+    remote.remove(name, yes=yes, path=path)
+
+
+@remote_app.command("rename")
+def remote_rename(
+    old: Annotated[str, typer.Argument(metavar="旧名", help="原远程名")],
+    new: Annotated[str, typer.Argument(metavar="新名", help="新远程名")],
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """重命名远程."""
+    remote.rename(old, new, path=path)
+
+
+@remote_app.command("set-url")
+def remote_set_url(
+    name: Annotated[str, typer.Argument(metavar="远程名", help="要改的远程")],
+    url: Annotated[str, typer.Argument(metavar="地址", help="新的拉取地址")],
+    push_only: Annotated[bool, typer.Option("--push", help="只改推送地址, 不动拉取地址")] = False,
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """修改远程地址 (GitHub 地址默认连推送地址一起改好)."""
+    remote.set_url(name, url, push_only=push_only, path=path)
+
+
+@remote_app.command("show")
+def remote_show(
+    name: Annotated[str, typer.Argument(metavar="远程名", help="要查看的远程")],
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """查看单个远程的地址与形态."""
+    remote.show(name, path)
+
+
+app.add_typer(remote_app, name="remote", rich_help_panel=PANEL_REPO)
+
+
+submodule_app = typer.Typer(help="子模组: 添加 / 更新 / 查看 / 同步 / 删除 (拉取走加速)",
+                            rich_markup_mode="rich", invoke_without_command=True,
+                            context_settings={"help_option_names": ["-h", "--help"]})
+
+
+@submodule_app.callback()
+def _submodule_root(ctx: typer.Context) -> None:
+    # 不带子命令 = 列出子模组
+    if ctx.invoked_subcommand is None:
+        submodule.list_submodules()
+
+
+@submodule_app.command("list")
+def submodule_list(
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """列出子模组状态."""
+    submodule.list_submodules(path)
+
+
+@submodule_app.command("status")
+def submodule_status(
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """列出子模组状态 (同 list)."""
+    submodule.list_submodules(path)
+
+
+@submodule_app.command("add")
+def submodule_add(
+    url: Annotated[str, typer.Argument(metavar="地址", help="子模组仓库链接")],
+    sub_path: Annotated[Optional[str], typer.Argument(metavar="[路径]", help="检出到哪个目录")] = None,
+    name: Annotated[str, typer.Option("--name", help="子模组名 (默认取路径)")] = "",
+    branch: Annotated[str, typer.Option("--branch", "-b", help="跟踪的分支")] = "",
+    depth: Annotated[int, typer.Option("--depth", help="浅克隆深度, 0 = 完整")] = 0,
+    force: Annotated[bool, typer.Option("--force", "-f", help="目标已存在也强制添加")] = False,
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """添加子模组 (拉取同样走加速)."""
+    submodule.add(url, sub_path or "", name=name, branch=branch, depth=depth, force=force, path=path)
+
+
+@submodule_app.command("update")
+def submodule_update(
+    paths: Annotated[Optional[list[str]], typer.Argument(metavar="[路径...]", help="只更新指定子模组")] = None,
+    init: Annotated[bool, typer.Option("--init/--no-init", help="未初始化的子模组也一并初始化")] = True,
+    remote: Annotated[bool, typer.Option("--remote", help="跟踪子模组的远端最新提交, 而不是 .gitmodules 里锁定的提交")] = False,
+    depth: Annotated[int, typer.Option("--depth", help="浅克隆深度, 0 = 完整")] = 0,
+    jobs: Annotated[int, typer.Option("--jobs", "-j", help="并行拉取的子模组数, 0 = git 默认")] = 0,
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """拉取子模组内容 (默认 --init --recursive, 走加速)."""
+    submodule.update(tuple(paths or ()), init=init, remote=remote, depth=depth, jobs=jobs, path=path)
+
+
+@submodule_app.command("sync")
+def submodule_sync(
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """把子模组远端地址同步成 .gitmodules 里的配置."""
+    submodule.sync(path)
+
+
+@submodule_app.command("remove")
+def submodule_remove(
+    sub_path: Annotated[str, typer.Argument(metavar="路径", help="子模组路径")],
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="跳过确认")] = False,
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """删除子模组 (含 .gitmodules 条目与本地缓存)."""
+    submodule.remove(sub_path, yes=yes, path=path)
+
+
+app.add_typer(submodule_app, name="submodule", rich_help_panel=PANEL_COLLAB)
+
+
+pr_app = typer.Typer(help="Pull Request: 列表 / 详情 / 创建", rich_markup_mode="rich",
+                     invoke_without_command=True, context_settings={"help_option_names": ["-h", "--help"]})
+
+
+@pr_app.callback()
+def _pr_root(ctx: typer.Context) -> None:
+    # 不带子命令 = 列出当前仓库的开放 PR
+    if ctx.invoked_subcommand is None:
+        pr.list_pulls("", state="open", limit=20, prefix=config.active_proxy())
+
+
+@pr_app.command("list")
+def pr_list(
+    target: Annotated[str, typer.Argument(metavar="[仓库]", help="owner/repo 或链接, 缺省取当前仓库 origin")] = "",
+    state: Annotated[str, typer.Option("--state", help="open / closed / all")] = "open",
+    limit: Annotated[int, typer.Option("--limit", "-n", help="显示多少条 (最多 100)")] = 20,
+    proxy: Annotated[Optional[str], typer.Option("--proxy", help="本次使用的加速源")] = None,
+    no_proxy: Annotated[bool, typer.Option("--no-proxy", help="本次直连, 不走加速")] = False,
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """列出 Pull Request (走 API, 默认加速)."""
+    if state not in pr.STATES:
+        console.error(f"不支持的 state: {state} (可选: {', '.join(pr.STATES)})")
+    pr.list_pulls(target, state=state, limit=limit, prefix=config.active_proxy(proxy, no_proxy), path=path)
+
+
+@pr_app.command("view")
+def pr_view(
+    number: Annotated[int, typer.Argument(metavar="编号", help="PR 编号")],
+    target: Annotated[str, typer.Argument(metavar="[仓库]", help="owner/repo 或链接, 缺省取当前仓库")] = "",
+    web: Annotated[bool, typer.Option("--web", help="同时用浏览器打开")] = False,
+    proxy: Annotated[Optional[str], typer.Option("--proxy", help="本次使用的加速源")] = None,
+    no_proxy: Annotated[bool, typer.Option("--no-proxy", help="本次直连, 不走加速")] = False,
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """查看单个 PR 的标题 / 状态 / 正文."""
+    pr.view(number, target, prefix=config.active_proxy(proxy, no_proxy), browse=web, path=path)
+
+
+@pr_app.command("create")
+def pr_create(
+    title: Annotated[str, typer.Option("--title", "-t", help="标题, 缺省时由 gh 交互询问")] = "",
+    body: Annotated[str, typer.Option("--body", "-b", help="正文")] = "",
+    base: Annotated[str, typer.Option("--base", help="目标分支, 如 main")] = "",
+    head: Annotated[str, typer.Option("--head", help="来源分支, 缺省为当前分支")] = "",
+    fill: Annotated[bool, typer.Option("--fill", help="用提交信息自动填标题与正文")] = False,
+    draft: Annotated[bool, typer.Option("--draft", help="创建为草稿 PR")] = False,
+    path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
+) -> None:
+    """用已登录的 gh 创建 Pull Request."""
+    pr.create(title, body, base=base, head=head, fill=fill, draft=draft, path=path)
+
+
+app.add_typer(pr_app, name="pr", rich_help_panel=PANEL_COLLAB)
+
+
 # ================================================================ 加速管理
 
 proxy_app = typer.Typer(help="加速管理: 拉取走加速, 推送直连", rich_markup_mode="rich",
@@ -1122,6 +1355,45 @@ def config_zh(
 app.add_typer(config_app, name="config", rich_help_panel=PANEL_CONF)
 
 
+cache_app = typer.Typer(help="缓存管理: 查看 / 清理 ~/.cache/gitx (可再生的数据)",
+                        rich_markup_mode="rich", invoke_without_command=True,
+                        context_settings={"help_option_names": ["-h", "--help"]})
+
+
+@cache_app.callback()
+def _cache_root(ctx: typer.Context) -> None:
+    # 不带子命令 = 查看缓存占用
+    if ctx.invoked_subcommand is None:
+        cache.info()
+
+
+@cache_app.command("info")
+def cache_info() -> None:
+    """查看缓存目录与占用."""
+    cache.info()
+
+
+@cache_app.command("clear")
+def cache_clear(
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="跳过确认")] = False,
+) -> None:
+    """清空缓存 (下次使用自动重建)."""
+    cache.clear(yes=yes)
+
+
+app.add_typer(cache_app, name="cache", rich_help_panel=PANEL_CONF)
+
+
+@app.command("upgrade", rich_help_panel=PANEL_CONF)
+def upgrade_cmd(
+    check: Annotated[bool, typer.Option("--check", help="只检查是否有新版本, 不安装")] = False,
+    force: Annotated[bool, typer.Option("--force", help="同版本或更旧也强制重装")] = False,
+    no_proxy: Annotated[bool, typer.Option("--no-proxy", help="本次直连, 不走加速")] = False,
+) -> None:
+    """自更新到最新版本 (查 Release 与下载 wheel 都走加速)."""
+    upgrade.run(check_only=check, force=force, no_proxy=no_proxy)
+
+
 def _mask(key: str, value: object) -> str:
     """token 之类敏感值只显示尾巴."""
     text = str(value)
@@ -1140,8 +1412,10 @@ def _config_list() -> None:
 
 
 @app.command(rich_help_panel=PANEL_CONF)
-def doctor() -> None:
-    """环境自检: git / gh / 仓库 / 加速源 / 编码."""
+def doctor(
+    fix: Annotated[bool, typer.Option("--fix", help="交互式修复可自动处理的问题 (编码 / pull 策略 / 上游)")] = False,
+) -> None:
+    """环境自检: git / gh / 仓库 / 加速源 / 编码 (--fix 可顺手修好)."""
     cfg = config.load()
     table = console.table("项目", "状态", title=f"gitx {__version__} 环境自检")
     table.add_row("配置文件", console.txt(config.config_path()))
@@ -1169,7 +1443,38 @@ def doctor() -> None:
     else:
         table.add_row("编码", console.txt("中文文件名会转义显示, 建议: gitx config zh --global"))
     console.print(table)
+    if fix:
+        _doctor_fix()
     _proxy_test()
+
+
+def _doctor_fix() -> None:
+    """按需修好几项常见问题 (逐项询问, assume_yes=true 时自动全做)."""
+    console.step("检查可自动修复的项...")
+    prefix = config.active_proxy()
+    fixes: list[tuple[str, str, object]] = []
+    quotepath = gitcmd.capture(["git", "config", "--global", "--get", "core.quotepath"])[1]
+    if quotepath not in ("false", "0", "off"):
+        fixes.append(("中文文件名会转义", "写入 core.quotepath=false 与 UTF-8 日志编码",
+                      lambda: gitcmd.apply_zh_config("--global")))
+    if not gitcmd.capture(["git", "config", "--global", "--get", "pull.rebase"])[1]:
+        fixes.append(("git pull 未设调和策略", "设置 pull.rebase=false, 避免裸 git pull 在分支分歧时报错",
+                      lambda: gitcmd.capture(["git", "config", "--global", "pull.rebase", "false"])))
+    if gitcmd.is_repo():
+        branch = gitcmd.current_branch()
+        if branch and not gitcmd.has_upstream() and gitcmd.remote_branch_exists("origin", branch, ".", prefix):
+            fixes.append((f"分支 {branch} 未关联上游", f"关联 origin/{branch}",
+                          lambda: gitcmd.set_upstream("origin", branch)))
+    if not fixes:
+        console.done("没有需要修复的项")
+        return
+    for title, desc, action in fixes:
+        if console.ask(f"{title} —— {desc}?", default=True):
+            action()  # type: ignore[operator]
+            console.done(f"已处理: {title}")
+        else:
+            console.info(f"已跳过: {title}")
+    console.done("修复完成")
 
 
 # ================================================================ 下载分发
@@ -1184,6 +1489,48 @@ def _clear_dest(dest: str) -> None:
             shutil.rmtree(dest)
         else:
             os.remove(dest)
+
+
+def _read_links(path: str) -> list[str]:
+    """从文本文件读取链接 (每行一个, 空行与 # 注释跳过; - 表示标准输入)."""
+    try:
+        text = sys.stdin.read() if path == "-" else open(path, encoding="utf-8").read()
+    except OSError as exc:
+        console.error(f"读取链接文件失败: {exc}")
+    return [line.strip() for line in text.splitlines()
+            if line.strip() and not line.strip().startswith("#")]
+
+
+def _batch_target(url: str, dest: Optional[str]) -> Optional[str]:
+    """批量下载时按链接算各自的保存路径 (dest 视为目录)."""
+    if not dest:
+        return None
+    try:
+        info = github.parse_url(url)
+    except ValueError:
+        return os.path.join(dest, "download")
+    name = os.path.basename(info["path"]) if info["path"] else info["repo"]
+    return os.path.join(dest, name)
+
+
+def _do_download_many(urls: list[str], dest: Optional[str], depth: Optional[int], branch: str,
+                      proxy: Optional[str], no_proxy: bool, **kwargs: object) -> None:
+    """一个链接走原路径; 多个链接逐个下载, 单个失败不影响其余, 末尾汇总."""
+    if len(urls) == 1:
+        _do_download(urls[0], dest, depth, branch, proxy, no_proxy, **kwargs)  # type: ignore[arg-type]
+        return
+    ok = 0
+    failed: list[str] = []
+    for index, url in enumerate(urls, 1):
+        console.step(f"[{index}/{len(urls)}] {url}")
+        try:
+            _do_download(url, _batch_target(url, dest), depth, branch, proxy, no_proxy, **kwargs)  # type: ignore[arg-type]
+            ok += 1
+        except SystemExit:
+            failed.append(url)  # console.error 会抛 SystemExit: 记录后继续下一个
+    if failed:
+        console.error(f"批量下载结束: 成功 {ok} 个, 失败 {len(failed)} 个\n  失败: " + "; ".join(failed))
+    console.done(f"批量下载完成: {ok} 个链接全部成功")
 
 
 def _do_download(url: str, dest: Optional[str], depth: Optional[int], branch: str,

@@ -53,6 +53,7 @@ gitx proxy release off     # Release 直连, 其它功能仍走加速
 gitx proxy release follow  # 取消独立设置, 跟随全局
 gitx config set token ghp_xxx   # 设置 GitHub API token, 限额 60 -> 5000 次/小时
 gitx config edit            # 用 $EDITOR 直接编辑 TOML 配置 (带中文注释)
+gitx upgrade                # 自更新到最新版本 (查 Release / 下 wheel 都走加速)
 ```
 
 ## 卸载

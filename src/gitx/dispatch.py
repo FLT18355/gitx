@@ -31,7 +31,14 @@ SUBCOMMANDS = frozenset({
     "stash", "tag", "commit", "diff", "discard", "clean",
     "search", "stat", "web", "ignore",
     "proxy", "config", "doctor", "git",
+    "remote", "submodule", "pr", "cache", "upgrade",
 })
+
+# 只接管自家子命令的命令: 其余参数 (gitx remote -v / gitx submodule foreach) 仍透传 git
+_PARTIAL = {
+    "remote": frozenset({"list", "add", "remove", "rename", "set-url", "show"}),
+    "submodule": frozenset({"add", "update", "status", "sync", "remove", "list"}),
+}
 
 _DOWNLOAD_PREFIXES = ("http://", "https://", "git@", "git://", "ssh://", "www.", "github.com/")
 
@@ -70,6 +77,12 @@ def handle(argv: list[str]) -> tuple[int | None, list[str]]:
     if first == "help":  # gitx help [子命令] -> 显示帮助, 别交给 git
         return None, ([*argv[1:], "--help"] if len(argv) > 1 else ["--help"])
     if first in ("-h", "--help", "--install-completion", "--show-completion"):
+        return None, argv
+    own = _PARTIAL.get(first)
+    if own is not None:
+        sub = argv[1] if len(argv) > 1 else ""
+        if sub and sub not in own and sub not in ("-h", "--help"):
+            return _run_git(argv), argv  # 未知子命令/选项: 交回 git, 如 gitx remote -v
         return None, argv
     if first in SUBCOMMANDS:
         return None, argv

@@ -1,6 +1,6 @@
 ---
 name: gitx
-version: 1.0.3
+version: 1.0.4
 description: 给中国人用的 GitHub 加速与同步工具 —— 下载 / 同步 / 加速 / 分支 / 暂存 / 标签 / 提交 / 改动
 author: FLT18355
 repository: https://github.com/FLT18355/gitx
@@ -41,6 +41,8 @@ gitx doctor         # 环境自检
 - **git 透传不加载 typer**：`gitx status` / `gitx log --oneline` 几乎瞬时完成
 - **断点续传**：中断的下载留下 `.part`，重跑自动续传
 - **部分克隆 + 稀疏检出**：文件夹下载快 8 倍（只拉取目标目录的 blob）
+- **协作一条龙**：`gitx remote`（拉取加速 + 推送直连）/ `gitx submodule`（子模组也走加速）/ `gitx pr`（列表 / 详情 / 创建）
+- **自更新**：`gitx upgrade` 查 Release 与下 wheel 都走加速
 
 ## 命令速查
 
@@ -55,6 +57,8 @@ gitx github.com/owner/repo/tree/分支/路径             # 链接可省略 http
 gitx release owner/repo                               # 交互式挑发布 + 挑附件
 gitx release owner/repo --tag v1.0.0 -a '*linux*'     # 指定标签 + 通配附件
 gitx https://github.com/owner/repo/releases/latest    # 最新发布 (= .../releases)
+gitx download url1 url2 -o 目录                       # 批量下多个链接 (失败不影响其余)
+gitx download -f 链接.txt                             # 从文本文件读链接 (每行一个, # 注释; - 读标准输入)
 ```
 
 ### 同步
@@ -111,6 +115,27 @@ gitx web [issues|pulls|releases|...] [--print]      # 浏览器打开当前仓�
 gitx ignore python node [--force]                   # 拉取 .gitignore 模板
 ```
 
+### 协作与进阶（新增）
+```bash
+gitx remote                        # 列出远程 (拉取/推送地址)
+gitx remote add <名> <地址>         # 加远程: GitHub 地址自动"拉取加速 + 推送直连"
+gitx remote set-url|rename|remove|show ...   # 改址 / 重命名 / 删除 / 查看
+# 未知参数仍透传 git: gitx remote -v / gitx remote prune origin
+
+gitx submodule                     # 子模组状态
+gitx submodule add <地址> <路径>    # 添加 (拉取走加速)
+gitx submodule update [--remote]   # 拉取子模组 (默认 --init --recursive, 走加速)
+gitx submodule sync|remove <路径>   # 地址同步 / 删除
+
+gitx pr                            # 当前仓库的开放 PR
+gitx pr list [owner/repo] [--state open|closed|all] [-n 30]
+gitx pr view <编号> [--web]        # 标题/状态/正文
+gitx pr create [-t 标题 -b 正文] [--fill] [--draft]   # 交给已登录的 gh
+
+gitx cache [info]                  # 看 ~/.cache/gitx 的占用
+gitx cache clear [-y]              # 清空 (可再生产数据, 下次自动重建)
+```
+
 ### 加速管理
 ```bash
 gitx proxy [status]          # 查看状态（含 Release 专用加速源）
@@ -129,7 +154,8 @@ gitx proxy test                # 测试加速源连通性（Release 独立设置
 gitx config [list|get|set|reset|zh]
 gitx config edit               # 用 $VISUAL / $EDITOR 直接编辑配置文件
 gitx config path               # 打印配置文件路径
-gitx doctor                    # 环境自检: git/gh/token/仓库/加速源/编码
+gitx doctor [--fix]            # 环境自检; --fix 顺手修好编码 / pull 策略 / 上游
+gitx upgrade [--check]         # 自更新到最新版本 (查 Release / 下 wheel 都走加速)
 ```
 
 ## 常用场景示例

@@ -1,30 +1,73 @@
-# gitx vX.Y.Z 发布说明
+# gitx v1.0.4 发布说明
 
 ## 🎉 新增
 
-- 新增命令 **`gitx <command>`** —— 一句话描述功能
+- 配置文件换成 **人类可读的 TOML** —— `~/.config/gitx/config.toml`
+  - 逐项中文注释, 按终端显示宽度对齐; `gitx config set` 改写后注释不丢
+  - 旧版 `config.json` 首次运行**自动迁移**为 TOML, 原文件保留为 `config.json.bak`
+  - 新增 `gitx config edit`(用 `$EDITOR` 直接改)与 `gitx config path`
+  - 手改坏了值会"警告一次 + 回退默认", 不再崩溃
+
+- 新增命令 **`gitx upgrade`** —— 自更新, 查 Release 与下载 wheel 都走加速
   ```bash
-  gitx <command> <示例>   # 说明
-  gitx <command>          # 另一种用法
-  gitx <command> --json   # JSON 输出 (脚本友好)
+  gitx upgrade            # 更新到最新版本
+  gitx upgrade --check    # 只检查是否有新版本
+  gitx upgrade --force    # 同版本 / 更旧也强制重装
   ```
 
-- 核心能力点
-  - 功能点 1
-  - 功能点 2
-  - 功能点 3
+- 新增命令 **`gitx remote`** —— 远程管理 (拉取加速 + 推送直连)
+  ```bash
+  gitx remote add upstream https://github.com/owner/repo
+  gitx remote set-url origin https://github.com/owner/repo
+  gitx remote show / rename / remove / list
+  # 未知参数仍透传 git: gitx remote -v
+  ```
 
-## 📊 一次可看 / 做
+- 新增命令 **`gitx submodule`** —— 子模组一条龙, 拉取同样走加速
+  ```bash
+  gitx submodule add https://github.com/owner/repo libs/x
+  gitx submodule update [--remote]   # 默认 --init --recursive
+  gitx submodule status / sync / remove
+  ```
 
-- 指标 / 数据 1
-- 指标 / 数据 2
-- ...
+- 新增命令 **`gitx pr`** —— Pull Request 列表 / 详情 / 创建
+  ```bash
+  gitx pr / gitx pr list cli/cli --state all -n 30
+  gitx pr view 1234 [--web]
+  gitx pr create -t "标题" -b "正文" [--fill] [--draft]   # 交给已登录的 gh
+  ```
+
+- 新增命令 **`gitx cache`** —— 缓存查看与清理 (`~/.cache/gitx`, 可再生产数据)
+  ```bash
+  gitx cache          # 看占用
+  gitx cache clear    # 清空 (下次自动重建)
+  ```
+
+- **`gitx download` 支持批量** —— 一次下多个链接, 失败的不影响其余
+  ```bash
+  gitx download url1 url2 -o 下载目录
+  gitx download -f 链接.txt -o 下载目录     # 每行一个, # 注释, - 读标准输入
+  ```
+
+- **`gitx doctor --fix`** —— 一键修好 `core.quotepath`(中文文件名) / `pull.rebase` / 分支上游
+
+- 新增 5 项配置键: `dest`(默认下载目录) / `resume`(断点续传) / `sync_rebase`(sync 变基或合并) /
+  `color`(auto|never) / `assume_yes`(处处跳过确认)
+
+## 🔧 修复
+
+- `gitx pull` 与 `gitx sync --merge` 在分支已分歧时报"需要指定如何调和偏离的分支" ——
+  现在显式传 `--no-rebase`(git 2.27+ 未配 `pull.rebase` 时会直接报错)
+- `gitx proxy on <非法加速源>` 不再打印完整堆栈, 改为一行中文提示
+- `gitx sync_rebase=false` 的合并路径此前实际不可用, 本次一并修好并验证
 
 ## 🔧 技术细节
 
-- 模块/文件: 关键变更点
-- `xxx.py`: 新增/重构了什么, 原因/设计
-- ...
+- `config.py`: TOML 读写 + 自动迁移 + 类型校验/归一 + 显示宽度对齐的注释模板
+- `upgrade.py` / `remote.py` / `submodule.py` / `pr.py` / `cache.py`: 5 个新模块
+- `gitcmd.pull()`: 显式 `--rebase` / `--no-rebase`
+- `dispatch.py`: `remote` / `submodule` 部分接管, 未知子命令仍透传 git
+- 子模组加速复用 `git -c url.<镜像>.insteadOf`(规则不落盘); `gitx remote` 写 fetch=加速 / push=直连
 
 ## 📦 安装/升级
 
@@ -33,22 +76,21 @@
 uv tool install .        # 或: uv tool install git@github.com:FLT18355/gitx.git
 
 # 方式 2: 从 Release 附件安装 (wheel)
-uv tool install gitx-X.Y.Z-py3-none-any.whl
+uv tool install gitx-1.0.4-py3-none-any.whl
 
 # 验证
-gitx --version           # 应输出 gitx X.Y.Z
+gitx --version           # 应输出 gitx 1.0.4
 gitx doctor              # 环境自检
 ```
 
 ## 🔗 相关
 
-- 源码: https://github.com/FLT18355/gitx/tree/vX.Y.Z
-- 完整变更: `git log v<prev>..vX.Y.Z --oneline`
-- Issue / PR: #<编号>
+- 源码: https://github.com/FLT18355/gitx/tree/v1.0.4
+- 完整变更: `git log v1.0.3..v1.0.4 --oneline`
 
 ---
 
-*发布于: 2026-XX-XX*
+*发布于: 2026-10-06*
 
 <!-- ================================================================
      以下是发布流程规范 (不随发布说明一起贴出), 每次发版必须遵守。

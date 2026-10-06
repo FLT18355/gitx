@@ -796,7 +796,7 @@ def proxy_on(
 ) -> None:
     """开启加速 (默认 v6)."""
     cfg = config.load()
-    accel.resolve(source)
+    source = _checked_source("proxy", source)
     config.save({**cfg, "proxy": source})
     console.done(f"已开启加速: {source}")
 
@@ -820,9 +820,8 @@ def proxy_set(
     source: Annotated[str, typer.Argument(metavar="加速源", help="v6 / v4 / gh-proxy / https://...")],
 ) -> None:
     """设置加速源."""
-    cfg = config.load()
-    accel.resolve(source)
-    config.save({**cfg, "proxy": source})
+    source = _checked_source("proxy", source)
+    config.save({**config.load(), "proxy": source})
     console.done(f"加速源已设为: {source}")
 
 

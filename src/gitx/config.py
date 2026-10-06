@@ -197,6 +197,13 @@ def toml_value(value: object) -> str:
     return json.dumps(str(value), ensure_ascii=False)
 
 
+def _display_width(text: str) -> int:
+    """终端显示宽度: 中文/全角算 2 列 —— 注释对齐要按它算, 不按字符数。"""
+    import unicodedata  # noqa: PLC0415  只在写配置时用
+
+    return sum(2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1 for ch in text)
+
+
 def _dump(data: dict) -> str:
     """带注释、按组分段的 TOML 文本 —— 注释是给人看的, 改完即生效。"""
     path = config_path()
@@ -221,7 +228,8 @@ def _dump(data: dict) -> str:
             line = f"{key} = {toml_value(data.get(key, DEFAULTS[key]))}"
             comment = _COMMENTS.get(key)
             if comment:
-                line = f"{line:<28}# {comment}"
+                pad = max(1, 30 - _display_width(line))
+                line = f"{line}{' ' * pad}# {comment}"
             lines.append(line)
         lines.append("")
     extra = [(k, v) for k, v in data.items() if k not in keys_done]

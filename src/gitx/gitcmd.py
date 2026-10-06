@@ -367,10 +367,12 @@ def delete_remote_ref(path: str, remote: str, ref: str) -> tuple[int, str]:
 
 
 def pull(path: str = ".", rebase: bool = False, prefix: str | None = None) -> bool:
-    """拉取; prefix 非空时用 -c 临时覆盖 insteadOf 走加速(不改远程 URL)."""
-    args = ["git", "-C", path, *proxy_args(prefix), "pull"]
-    if rebase:
-        args.append("--rebase")
+    """拉取; prefix 非空时用 -c 临时覆盖 insteadOf 走加速(不改远程 URL).
+
+    显式传 --rebase / --no-rebase: 分支已分歧且 git 没配 pull.rebase 时,
+    裸 `git pull` 会直接报 "需指定如何调和偏离的分支" 而失败 (git 2.27+ 的行为).
+    """
+    args = ["git", "-C", path, *proxy_args(prefix), "pull", "--rebase" if rebase else "--no-rebase"]
     return subprocess.run(args).returncode == 0
 
 

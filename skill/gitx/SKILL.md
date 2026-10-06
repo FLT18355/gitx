@@ -127,6 +127,8 @@ gitx proxy test                # 测试加速源连通性（Release 独立设置
 ### 配置与自检
 ```bash
 gitx config [list|get|set|reset|zh]
+gitx config edit               # 用 $VISUAL / $EDITOR 直接编辑配置文件
+gitx config path               # 打印配置文件路径
 gitx doctor                    # 环境自检: git/gh/token/仓库/加速源/编码
 ```
 
@@ -174,12 +176,20 @@ GITX_RELEASE_PROXY=off|v6|v4|gh-proxy|... # 只覆盖 Release 功能的加速源
 
 ## 配置文件
 
-`~/.config/gitx/config.json`（或 `$XDG_CONFIG_HOME/gitx/config.json`）
+`~/.config/gitx/config.toml`（或 `$XDG_CONFIG_HOME/gitx/config.toml`）—— **TOML**，带中文注释、
+人类可读可改，改完即生效；用 `gitx config set` 改写时注释不会丢。
+旧版的 `config.json` 首次运行会自动迁移成 `config.toml`（原文件保留为 `config.json.bak`）。
+想直接编辑用 `gitx config edit`，只看路径用 `gitx config path`。
 
 可配置键：
 - `proxy` = v6 / v4 / gh-proxy / off / 自定义 URL
 - `release_proxy` = Release 专用加速源（空 = 跟随 proxy，`gitx proxy release` 管理）
 - `depth` = 克隆深度 (默认 1，0 = 完整克隆)
 - `branch` = 默认分支 (下载时 URL 未带分支则用它, 空 = 远端默认分支)
+- `dest` = 默认下载目录（支持 `~`，留空 = 当前目录；命令行显式路径优先）
+- `resume` = 断点续传开关 (默认 true；关掉后 `.part` 不再续传)
 - `message` = push 默认提交信息
+- `sync_rebase` = `gitx sync` 先拉再推时用变基(true，默认)还是合并(false)（`--merge` 临时覆盖）
 - `token` = GitHub API token (限额 60 → 5000 次/小时)
+- `color` = 彩色输出 auto / never
+- `assume_yes` = 处处跳过确认，相当于每条命令都带 -y (默认 false)

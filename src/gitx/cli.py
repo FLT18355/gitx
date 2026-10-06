@@ -1091,7 +1091,6 @@ def config_reset() -> None:
     console.done("配置已重置为默认")
 
 
-
 @config_app.command("path")
 def config_path_cmd() -> None:
     """打印配置文件路径."""
@@ -1106,6 +1105,7 @@ def config_edit() -> None:
     config.ensure_file()
     editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi"
     subprocess.run([*shlex.split(editor), str(config.config_path())])
+
 
 @config_app.command("zh")
 def config_zh(

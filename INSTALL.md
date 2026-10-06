@@ -52,6 +52,7 @@ gitx proxy release on v4   # 只给 Release 换加速源 (克隆 / 同步等照�
 gitx proxy release off     # Release 直连, 其它功能仍走加速
 gitx proxy release follow  # 取消独立设置, 跟随全局
 gitx config set token ghp_xxx   # 设置 GitHub API token, 限额 60 -> 5000 次/小时
+gitx config edit            # 用 $EDITOR 直接编辑 TOML 配置 (带中文注释)
 ```
 
 ## 卸载
@@ -82,4 +83,6 @@ Notes:
 - Dependencies: `typer`, `prompt-toolkit`, `questionary` (pulled by uv).
 - `uv tool install .` inside the cloned repo is equivalent; it uninstalls any prior gitx first.
 - If plain `git clone` of GitHub fails (CN network), prefix the URL with the proxy: `https://v6.gh-proxy.org/https://github.com/FLT18355/gitx`.
-- Runtime config lives at `~/.config/gitx/config.json`; cache at `~/.cache/gitx/`.
+- Runtime config lives at `~/.config/gitx/config.toml` (TOML, with Chinese comments; a legacy
+  `config.json` is auto-migrated to `config.toml` on first run, kept as `config.json.bak`);
+  cache at `~/.cache/gitx/`. Edit it directly with `gitx config edit`.

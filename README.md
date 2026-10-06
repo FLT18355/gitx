@@ -251,15 +251,27 @@ gitx proxy uninstall  # 移除上述规则
 gitx proxy test       # 测试加速源连通性(git 克隆 / raw / API; Release 独立设置时会一并测试)
 ```
 
-### 其它
+### 配置
+
+配置文件是 **TOML**（带中文注释, 人类可读可改）: `~/.config/gitx/config.toml`
+（或 `$XDG_CONFIG_HOME/gitx/config.toml`）。改完即生效, 用 `gitx config set` 改写时注释也不会丢。
+旧版的 `config.json` 首次运行会自动迁移成 `config.toml`（原文件保留为 `config.json.bak`）。
 
 ```bash
-gitx config                 # 查看配置
+gitx config                 # 查看配置(表格)
+gitx config edit            # 用 $VISUAL / $EDITOR 直接编辑配置文件
+gitx config path            # 只打印配置文件路径
 gitx config set depth 0     # 默认完整克隆
 gitx config set branch develop   # 默认分支 (下载时 URL 未带分支则用它, 空 = 远端默认)
+gitx config set dest ~/下载  # 默认下载目录 (支持 ~; 命令行给的路径优先)
+gitx config set resume false     # 关掉断点续传
+gitx config set sync_rebase false  # gitx sync 用合并而非变基 (--merge 仍可临时覆盖)
+gitx config set color never      # 关闭彩色输出 (auto / never)
+gitx config set assume_yes true  # 处处跳过确认, 相当于每条命令都带 -y
 gitx config set message 更新 # 默认提交信息
 gitx config set token ghp_xxx   # 设置 API token (提高限额到 5000 次/小时, 显示时自动打码)
 gitx config set release_proxy v4       # 等价于 gitx proxy release set v4 (空值 = 跟随全局)
+gitx config reset           # 恢复默认配置
 gitx doctor                 # 环境自检(git/gh/token/仓库/加速源/编码)
 gitx status / gitx log --oneline   # git 子命令直接透传 (原生 init: gitx git init)
 gitx dowload ...            # 子命令笔误会给出形近提示
@@ -307,7 +319,7 @@ gitx dowload ...            # 子命令笔误会给出形近提示
 ```
 src/gitx/
   __init__.py   入口: 快速分发先行, 需要时才加载 typer    dispatch.py   git 透传 / --version 快速通道 (仅标准库)
-  console.py    rich 控制台 (Catppuccin 主题)    config.py     持久化配置 (~/.config/gitx/config.json)
+  console.py    rich 控制台 (Catppuccin 主题)    config.py     持久化配置 (~/.config/gitx/config.toml, TOML + 自动迁移旧 JSON)
   accel.py      加速源与测速                              gitcmd.py     git 命令封装 (前置检查/分支/推送/维护原语)
   github.py     URL 解析 + REST API 客户端 (token 复用)   net.py        HTTP 下载: 断点续传 + 进度条
   download.py   仓库/文件夹/源码包下载                    release.py    Release 附件(API)

@@ -1,6 +1,6 @@
 [project]
 name = "gitx"
-version = "1.0.5"
+version = "1.0.5-pre1"
 description = "给中国人用的 GitHub 加速下载与同步工具"
 readme = "README.md"
 license = "MIT"

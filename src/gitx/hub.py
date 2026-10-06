@@ -83,6 +83,8 @@ def web(path: str = ".", what: str = "", *, browse: bool = True) -> str:
     elif what == "commit":
         url = f"{base}/commit/{gitcmd.resolve_sha('HEAD', path)}"
     else:
+        if what:
+            console.warn(f"未知页面: {what} (可选: {' / '.join(_WEB_PATHS)}, branch, commit), 已打开首页")
         url = base
     console.print(console.link(url, url))
     if browse:
@@ -195,7 +197,7 @@ def resolve_target(target: str) -> tuple[str, str]:
         if not parsed:
             console.error("origin 不是 GitHub 地址 (可先: gitx push to <仓库地址>)")
         return parsed
-    if arg.startswith(("http://", "https://", "git@")):
+    if arg.startswith(("http://", "https://", "git@", "github.com/")):
         parsed = github.owner_repo(arg)
         if not parsed:
             console.error(f"无法识别 GitHub 地址: {arg}")

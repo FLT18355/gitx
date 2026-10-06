@@ -12,10 +12,18 @@
 
 from __future__ import annotations
 
+import re
+
 from . import console, gitcmd
 
 
 _STASH_FMT = "%gd%x00%cr%x00%gs"
+# git 会把 -m 的备注包成 "On <分支>: <备注>"; 列表里只显示备注本身
+_ON_PREFIX_RE = re.compile(r"^On [^:]+: ")
+
+
+def _note(subject: str) -> str:
+    return _ON_PREFIX_RE.sub("", subject) if subject.startswith("On ") else subject
 
 
 def _exists(index: int, path: str = ".") -> bool:
@@ -40,7 +48,7 @@ def list_stashes(path: str = ".", limit: int = 20) -> None:
     table = console.table("序号", "时间", "说明", title=f"暂存 {len(lines)} 条")
     for line in lines[:limit]:
         parts = (line.split("\x00") + ["", "", ""])[:3]
-        table.add_row(console.txt(parts[0]), console.txt(parts[1]), console.txt(parts[2]))
+        table.add_row(console.txt(parts[0]), console.txt(parts[1]), console.txt(_note(parts[2])))
     console.print(table)
     console.hint("恢复用 gitx stash pop  (查看详情: gitx stash show [序号])")
 

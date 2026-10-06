@@ -10,8 +10,7 @@
 from __future__ import annotations
 
 import sys
-from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, Iterator, NoReturn, Sequence
+from typing import TYPE_CHECKING, Any, NoReturn, Sequence
 
 from rich.console import Console
 from rich.markup import escape
@@ -100,10 +99,6 @@ def warn(message: Any) -> None:
 def error(message: Any, code: int = 1) -> NoReturn:
     err_console.print(f"[err]\\[-][/err] {escape(str(message))}")
     raise SystemExit(code)
-
-
-def rule(title: str = "") -> None:
-    console.rule(f"[key]{escape(title)}[/key]" if title else "")
 
 
 def panel(body: Any, title: str = "", border: str = MOCHA["blue"]) -> None:
@@ -232,17 +227,6 @@ def progress() -> Progress:
         console=console,
         transient=True,
     )
-
-
-@contextmanager
-def spinner(message: str) -> Iterator[None]:
-    """长时间子进程 (clone / ls-remote) 的转圈提示; 非交互环境退化为普通输出."""
-    if console.is_terminal:
-        with console.status(f"[step]{escape(message)}[/step]", spinner="dots"):
-            yield
-    else:
-        step(message)
-        yield
 
 
 _CHUNK = 1 << 17  # 128 KiB: 减少读写循环次数

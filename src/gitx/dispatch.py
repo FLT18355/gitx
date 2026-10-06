@@ -33,7 +33,7 @@ SUBCOMMANDS = frozenset({
     "proxy", "config", "doctor", "git",
 })
 
-_DOWNLOAD_PREFIXES = ("http://", "https://", "git@", "git://", "ssh://", "www.")
+_DOWNLOAD_PREFIXES = ("http://", "https://", "git@", "git://", "ssh://", "www.", "github.com/")
 
 
 def is_download(token: str) -> bool:

@@ -109,13 +109,11 @@ def installed_prefix(scope: str | None = None, path: str = "") -> str:
         return ""
     for line in out.splitlines():
         key = line.split()[0]
-        if not key.lower().endswith(".insteadof"):
-            continue
-        # key 形如: url.<prefix>/https://github.com/.insteadof
-        inner = key[len("url."):].lower()
+        inner = key[len("url."):]
+        low = inner.lower()
+        # key 形如: url.<prefix>/https://github.com/.insteadof (保留 prefix 原始大小写)
         for target in TARGETS:
-            marker = target.rstrip("/")
-            suffix = f"/{marker}/.insteadof"
-            if inner.endswith(suffix):
+            suffix = f"/{target.rstrip('/')}/.insteadof"
+            if low.endswith(suffix.lower()):
                 return inner[: -len(suffix)]
     return ""

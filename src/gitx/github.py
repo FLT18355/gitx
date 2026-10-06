@@ -13,7 +13,8 @@ _BLOB_RE = re.compile(r"^https?://github\.com/([^/]+)/([^/]+?)/(?:blob|raw)/([^/
 _SSH_RE = re.compile(r"^git@github\.com:([^/]+)/([^/]+?)(?:\.git)?/?$")
 _ASSET_RE = re.compile(r"^https?://github\.com/([^/]+)/([^/]+?)/releases/download/([^/]+)/(.+?)/?$")
 _RELEASE_RE = re.compile(
-    r"^https?://github\.com/([^/]+)/([^/]+?)/releases(?:/(?:tag|latest|expanded_assets)/([^/]+))?/?$"
+    r"^https?://github\.com/([^/]+)/([^/]+?)/releases"
+    r"(?:/(?:tag|expanded_assets)/([^/]+)|/latest)?/?$"
 )
 
 
@@ -24,10 +25,14 @@ def parse_url(url: str) -> dict:
     仓库:     https://github.com/owner/repo
     文件夹:   https://github.com/owner/repo/tree/分支/路径
     文件:     https://github.com/owner/repo/blob|raw/分支/路径/文件
-    发布页:   https://github.com/owner/repo/releases[/tag/标签]
+    发布页:   https://github.com/owner/repo/releases[/latest|/tag/标签]
     发布附件: https://github.com/owner/repo/releases/download/标签/文件名
+
+    裸主机名 (github.com/owner/repo) 会自动补上 https://, 省去手打前缀。
     """
     url = url.strip().rstrip("/").split("?")[0]
+    if url.startswith("github.com/"):
+        url = "https://" + url
     m = _SSH_RE.match(url)
     if m:
         return {"mode": "repo", "owner": m.group(1), "repo": m.group(2), "branch": "", "path": ""}

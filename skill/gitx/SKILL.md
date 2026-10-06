@@ -1,6 +1,6 @@
 ---
 name: gitx
-version: 1.0.2
+version: 1.0.3
 description: 给中国人用的 GitHub 加速与同步工具 —— 下载 / 同步 / 加速 / 分支 / 暂存 / 标签 / 提交 / 改动
 author: FLT18355
 repository: https://github.com/FLT18355/gitx
@@ -21,10 +21,10 @@ cd gitx
 uv tool install .
 
 # 方式 2：从 Release 附件安装（wheel）
-uv tool install gitx-1.0.2-py3-none-any.whl
+uv tool install gitx-1.0.3-py3-none-any.whl
 
 # 验证
-gitx --version      # 应输出 gitx 1.0.2
+gitx --version      # 应输出 gitx 1.0.3
 gitx doctor         # 环境自检
 ```
 
@@ -51,8 +51,10 @@ gitx https://github.com/owner/repo -x                 # 源码包 tar.gz (单流
 gitx https://github.com/owner/repo -X                 # 下载并直接解压
 gitx https://github.com/owner/repo/tree/分支/路径      # 文件夹 (部分克隆 + 稀疏检出)
 gitx https://github.com/owner/repo/blob/分支/路径/文件  # 单个文件
+gitx github.com/owner/repo/tree/分支/路径             # 链接可省略 https://
 gitx release owner/repo                               # 交互式挑发布 + 挑附件
 gitx release owner/repo --tag v1.0.0 -a '*linux*'     # 指定标签 + 通配附件
+gitx https://github.com/owner/repo/releases/latest    # 最新发布 (= .../releases)
 ```
 
 ### 同步
@@ -178,6 +180,6 @@ GITX_RELEASE_PROXY=off|v6|v4|gh-proxy|... # 只覆盖 Release 功能的加速源
 - `proxy` = v6 / v4 / gh-proxy / off / 自定义 URL
 - `release_proxy` = Release 专用加速源（空 = 跟随 proxy，`gitx proxy release` 管理）
 - `depth` = 克隆深度 (默认 1，0 = 完整克隆)
-- `branch` = 默认分支 (空 = 自动探测)
+- `branch` = 默认分支 (下载时 URL 未带分支则用它, 空 = 远端默认分支)
 - `message` = push 默认提交信息
 - `token` = GitHub API token (限额 60 → 5000 次/小时)

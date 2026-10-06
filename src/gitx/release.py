@@ -27,8 +27,11 @@ MAX_LIMIT = 100
 
 def parse_target(arg: str) -> dict:
     """owner/repo 或发布页/附件链接 -> info 字典 (mode: release | asset)."""
-    if arg.startswith(("http://", "https://")):
-        info = github.parse_url(arg)
+    if arg.startswith(("http://", "https://", "github.com/")):
+        try:
+            info = github.parse_url(arg)
+        except ValueError as exc:
+            console.error(f"{exc}\n用法: gitx release <owner/repo|发布页链接> [选项]")
         if info["mode"] not in ("release", "asset"):
             console.error("这不是发布页链接 (示例: https://github.com/owner/repo/releases)")
         return info

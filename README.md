@@ -2,6 +2,14 @@
 
 给中国人用的 GitHub 加速与同步工具 —— 下载 / 同步 / 加速, 一条命令搞定。
 
+> **v1.0.3: 链接解析与配置修复** ——
+> 修复 `https://github.com/owner/repo/releases/latest` 这类链接无法识别的问题(此前 `gitx release <该链接>` 会直接抛栈),
+> 现在 `/releases`、`/releases/latest`、`/releases/tag/<标签>`、`/releases/download/...` 都能正确解析;
+> GitHub 链接可省略 `https://`, `gitx github.com/owner/repo` 直接下载;
+> 修好文档里承诺却一直没生效的配置项 `branch`(默认分支)—— 现在按 **`--branch` > URL 内分支 > 配置 `branch` > 远端默认分支** 依次生效;
+> `gitx stash` 列表不再显示 git 的 `On <分支>: ` 前缀; `gitx web` 对未知页面给出提示而非静默开首页;
+> `gitx url` / `gitx proxy` 检测 insteadOf 规则时不再吞掉自定义加速源的大小写; 并清掉三处死代码。
+
 > **v1.0.2: Catppuccin Mocha 主题 + 欢迎页 + 修复** ——
 > 终端配色统一为 **Catppuccin Mocha**(表格 / 面板 / 进度条 / 交互选择器同源取色, 见 `console.py` 的 `MOCHA`);
 > 只输入 `gitx` 不再刷一屏帮助, 改成版本 + 加速状态 + 常用命令速查(全量帮助仍在 `gitx -h`);
@@ -37,7 +45,7 @@ uv run gitx -h   # 或: uv run python -m gitx --help
 或者从 Release 附件安装 (每个版本都提供**源码包**与 **uv 构建的 wheel** 两个文件):
 
 ```bash
-uv tool install gitx-1.0.2-py3-none-any.whl    # 或: uv tool install .
+uv tool install gitx-1.0.3-py3-none-any.whl    # 或: uv tool install .
 ```
 
 ## 用法
@@ -50,11 +58,13 @@ gitx https://github.com/owner/repo -x               # 源码包 tar.gz (单个�
 gitx https://github.com/owner/repo -X               # 下载并直接解压
 gitx https://github.com/owner/repo/tree/分支/路径   # 文件夹 (部分克隆 + 稀疏检出, 只取目标目录)
 gitx https://github.com/owner/repo/blob/分支/路径/文件  # 单个文件
+gitx github.com/owner/repo                          # 链接可省略 https://, 效果同上
 gitx clone https://github.com/owner/repo 我的目录   # 等价 download
 ```
 
 选项: `--no-proxy` 直连, `--proxy gh-proxy` 换加速源, `--branch <分支>`, `--depth <N>`(0 = 完整克隆),
 `--submodules` 连同子模组一起拉取(也走加速), `--fresh` 忽略断点从零下载。
+不给 `--branch` 时, 分支按 **URL 内分支 > 配置项 `branch`(`gitx config set branch develop`) > 远端默认分支** 依次决定。
 
 **断点续传**: 中断的下载会留下 `<文件>.part`, 重跑自动带 `Range` 续传, 不用重来。
 下载整仓库后自动把推送地址指回直连 GitHub(存在全局加速规则时用 SSH), 保证 `gitx push` 不被镜像拒绝。
@@ -82,6 +92,7 @@ gitx release owner/repo --fresh             # 忽略 .part 断点
 
 ```bash
 gitx https://github.com/owner/repo/releases/tag/v1.0.0          # 指定标签的附件
+gitx https://github.com/owner/repo/releases/latest              # 最新发布(等价 .../releases)
 gitx https://github.com/owner/repo/releases/download/v1.0.0/文件名  # 单个附件
 gitx https://github.com/owner/repo/releases --list              # 只看清单
 ```
@@ -256,6 +267,7 @@ gitx proxy test       # 测试加速源连通性(git 克隆 / raw / API; Release
 ```bash
 gitx config                 # 查看配置
 gitx config set depth 0     # 默认完整克隆
+gitx config set branch develop   # 默认分支 (下载时 URL 未带分支则用它, 空 = 远端默认)
 gitx config set message 更新 # 默认提交信息
 gitx config set token ghp_xxx   # 设置 API token (提高限额到 5000 次/小时, 显示时自动打码)
 gitx config set release_proxy v4       # 等价于 gitx proxy release set v4 (空值 = 跟随全局)

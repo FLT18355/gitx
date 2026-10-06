@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 import subprocess
 
-from . import accel, console, gitcmd, github, net
+from . import accel, config, console, gitcmd, github, net
 
 
 def download(url: str, dest: str, prefix: str | None, depth: int = 1, branch: str = "",
@@ -51,12 +51,20 @@ def _wrapped_clone_url(info: dict, prefix: str | None) -> tuple[str, str]:
     return accel.wrap(direct, prefix), direct
 
 
+def _configured_branch() -> str:
+    """配置里的默认分支 (gitx config set branch develop); 空 = 自动探测."""
+    return str(config.load().get("branch") or "")
+
+
 def _pick_branch(info: dict, clone_url: str, override: str) -> str:
-    """确定分支: 命令行 --branch > URL 内分支 > 远端默认分支."""
+    """确定分支: 命令行 --branch > URL 内分支 > 配置 branch > 远端默认分支."""
     if override:
         return override
     if info["branch"]:
         return info["branch"]
+    configured = _configured_branch()
+    if configured:
+        return configured
     return gitcmd.default_branch(clone_url)
 
 
@@ -158,7 +166,7 @@ def _download_archive(info: dict, dest: str, prefix: str | None, branch_override
     import tempfile
 
     owner, repo = info["owner"], info["repo"]
-    ref = branch_override or info["branch"]
+    ref = branch_override or info["branch"] or _configured_branch()
     if not ref:
         ref = gitcmd.default_branch(accel.wrap(github.repo_clone_url(owner, repo), prefix))
     if not ref:

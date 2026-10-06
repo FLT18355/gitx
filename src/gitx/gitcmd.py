@@ -36,10 +36,6 @@ def apply_zh_config(scope: str = "--local", path: str = ".") -> list[str]:
     return changed
 
 
-def run(args: Sequence[str]) -> subprocess.CompletedProcess:
-    return subprocess.run([str(a) for a in args])
-
-
 def capture(args: Sequence[str]) -> tuple[int, str]:
     try:
         r = subprocess.run([str(a) for a in args], capture_output=True, text=True)

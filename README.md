@@ -145,8 +145,13 @@ gitx publish list --repo cli/cli -n 10       # 看别人的发行版 (owner/repo
 | `publish delete` | 删除发行版 | `--cleanup-tag` 连标签一起删, `-y` 跳过确认 |
 
 附件参数直接给构建产物 (`dist/*.tar.gz dist/*.whl`), 通配符由 gh 展开, 上传前本地先检查文件是否存在;
-说明可用 `-F -` 从标准输入读, 于是能和 `RELEASE_TEMPLATE.md` 的"取到第一个 `---` 为止"配合:
-`gitx publish create v1.0.5 dist/* -p -F <(sed -n '1,/^---$/p' RELEASE_TEMPLATE.md)`。
+说明可用 `-F -` 从标准输入读, 于是能和 `RELEASE_TEMPLATE.md` 的"取到第一个 `---` 为止"配合
+(用管道, 别用 `<(...)` 进程替换 —— 进程替换的 fd 不会传给 gitx 拉起的 gh, gh 会报
+`open /dev/fd/63: no such file or directory`):
+
+```bash
+sed -n '1,/^---$/p' RELEASE_TEMPLATE.md | gitx publish create v1.0.5-pre2 dist/* -p -T "gitx 1.0.5-pre2" -F -
+```
 
 ### 探索 (新)
 

@@ -118,7 +118,9 @@ gh release create vX.Y.Z \
   --title "gitx X.Y.Z" --notes-file <(sed -n '1,/^---$/p' RELEASE_TEMPLATE.md)
 
 gitx publish create vX.Y.Z dist/gitx-X.Y.Z.tar.gz dist/gitx-X.Y.Z-py3-none-any.whl \
-  -T "gitx X.Y.Z" -F <(sed -n '1,/^---$/p' RELEASE_TEMPLATE.md) [-p 预发布] [-d 草稿]
+  -T "gitx X.Y.Z" [-p 预发布] [-d 草稿] -F -
+# 说明从标准输入给 (管道, 不是 <(进程替换) —— 进程替换的 fd 不会传给 gitx 拉起的 gh):
+sed -n '1,/^---$/p' RELEASE_TEMPLATE.md | gitx publish create vX.Y.Z dist/*.tar.gz dist/*.whl -T "gitx X.Y.Z" [-p] -F -
 ```
 
 ## 4. 上传后自检

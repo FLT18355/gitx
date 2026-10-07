@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 
-__version__ = "1.0.5-pre2"
+__version__ = "1.0.5"
 
 
 def main(argv: list[str] | None = None) -> None:

@@ -1,6 +1,6 @@
 ---
 name: gitx
-version: 1.0.5-pre2
+version: 1.0.5
 description: 给中国人用的 GitHub 加速与同步工具 —— 下载 / 同步 / 加速 / 分支 / 暂存 / 标签 / 提交 / 改动 / 发行版管理，一条命令搞定
 author: FLT18355
 repository: https://github.com/FLT18355/gitx
@@ -15,9 +15,14 @@ tags: [github, git, cli, download, sync, acceleration]
 ## 快速上手 ⚡
 
 ```bash
-# 1. 安装（推荐方式）
-git clone https://github.com/FLT18355/gitx.git && cd gitx
-uv tool install .
+# 1. 安装（三种方式，任选）
+# ① 官方二进制（最快，不需要 Python/uv）
+curl -L -o gitx https://github.com/FLT18355/gitx/releases/latest/download/gitx-linux-x86_64
+chmod +x gitx && sudo install -m755 gitx /usr/local/bin/gitx
+# ② wheel（要 gitx upgrade 自更新用这个）
+uv tool install gitx-1.0.5-py3-none-any.whl
+# ③ 源码
+git clone https://github.com/FLT18355/gitx.git && cd gitx && uv tool install .
 
 # 2. 环境自检
 gitx doctor

@@ -2,12 +2,13 @@
 
 给中国人用的 GitHub 加速与同步工具 —— 下载 / 同步 / 加速, 一条命令搞定。
 
-> **v1.0.5-pre2: 发行版管理 (预发布)** ——
-> 新增 **`gitx publish`**: 发行版一条龙 —— 列表 / 详情 / **创建并上传附件** / 补传附件 / 编辑(说明·预发布·草稿·最新) / 删除,
-> 全部交给已登录的 `gh`, 本工具只拼参数、不接触写入令牌; 附件直接给构建产物(`dist/*.whl` 通配),
-> 说明可 `-F 说明.md`(`-` 读标准输入, 方便配合发布模板); 未装 / 未登录 gh 时给中文提示。
-> 下载侧照旧: `gitx release` 仍是 API + 加速的只读路径, 不需要 gh。
-> (含 v1.0.5-pre1 的 skill 优化: 表格化命令速查、快速上手指南、常见问题解答。)
+> **v1.0.5: 官方二进制 + 发行版管理 + 全自动发版** ——
+> 每个发行版现在有 **4 个附件**: Nuitka 编译的 **`gitx-linux-x86_64` / `gitx-linux-arm64`**(单文件、免 Python 环境, 下载即可用)、
+> uv 构建的 **wheel** 与 **源码包**; 发版交给 **GitHub Actions**(推 `v*` 标签 -> 自动构建 4 个附件 -> 自动创建发行版), 以后发版只走这一条路。
+> 新增 **`gitx publish`**: 发行版一条龙 —— 列表 / 详情 / **创建并上传附件** / 补传附件 / 编辑(说明·预发布·草稿·最新) / 删除, 全部交给已登录的 `gh`。
+> 修复 **`gitx merge` / `gitx pull` 报"致命错误：储藏失败"**: git 合并前的快照 (`git stash create`) 在索引里有 "mtime 变了、内容没变" 的条目时会静默失败,
+> 现在合并 / 拉取前先刷新索引, 踩到就自动重试 (实测: 同样的干扰下裸 `git merge` 60 次失败 8 次, `gitx merge` 60 次全成功)。
+> (含 v1.0.5-pre1/pre2 的 skill 优化: 表格化命令速查、快速上手指南、常见问题解答。)
 >
 > **v1.0.4: TOML 配置 + 五项新命令** ——
 > 配置文件换成人类可读的 **TOML**(`~/.config/gitx/config.toml`, 逐项中文注释, `gitx config set` 后注释不丢;
@@ -40,11 +41,22 @@ uv sync          # 创建环境并安装 (依赖 typer / rich / questionary)
 uv run gitx -h   # 或: uv run python -m gitx --help
 ```
 
-或者从 Release 附件安装 (每个版本都提供**源码包**与 **uv 构建的 wheel** 两个文件):
+或者从 Release 附件安装 (每个版本都提供 **4 个附件**: 两个 **Nuitka 二进制** + **wheel** + **源码包**):
 
 ```bash
-uv tool install gitx-x.x.x-py3-none-any.whl    # 或: uv tool install .
+# 方式 1: 二进制 —— 单文件、免 Python, 下载即可用 (URL 固定指向最新正式版)
+curl -L -o gitx https://github.com/FLT18355/gitx/releases/latest/download/gitx-linux-x86_64
+chmod +x gitx && sudo install -m755 gitx /usr/local/bin/gitx   # arm64 换成 gitx-linux-arm64
+
+# 方式 2: wheel (要 gitx upgrade 自更新就用这个)
+uv tool install gitx-1.0.5-py3-none-any.whl    # 或: uv tool install .
+
+# 方式 3: 源码包
+tar xf gitx-1.0.5.tar.gz && uv tool install ./gitx-1.0.5
 ```
+
+> 二进制由 GitHub Actions 用 **Nuitka** 在 x86_64 与 arm64 上各编一份 (`.github/workflows/release.yml`),
+> 推 `v*` 标签即自动构建并创建发行版; 二进制版同样走加速镜像、同样能 `gitx merge` 等全套命令。
 
 ## 用法
 
@@ -150,8 +162,11 @@ gitx publish list --repo cli/cli -n 10       # 看别人的发行版 (owner/repo
 `open /dev/fd/63: no such file or directory`):
 
 ```bash
-sed -n '1,/^---$/p' RELEASE_TEMPLATE.md | gitx publish create v1.0.5-pre2 dist/* -p -T "gitx 1.0.5-pre2" -F -
+sed -n '1,/^---$/p' RELEASE_TEMPLATE.md | gitx publish create v1.0.5 dist/*.tar.gz dist/*.whl -T "gitx 1.0.5" -F -
 ```
+
+> 正式发版走 **GitHub Actions** (`.github/workflows/release.yml`): 推一个 `v*` 标签就自动构建
+> 4 个附件并创建发行版, 不用手动敲上面的命令; `gitx publish` 适合临时补传附件 / 改说明 / 删草稿 / 看列表。
 
 ### 探索 (新)
 

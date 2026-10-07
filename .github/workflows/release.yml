@@ -1,0 +1,190 @@
+name: 发布发行版
+
+# 以后发版只走这里: 推一个 v* 标签 (或手动指定已存在的标签) ->
+#   ① uv 打包: wheel + 源码包   ② Nuitka 编译: linux x86_64 + arm64 两个独立二进制
+#   ③ 自动创建发行版, 附件正好四个 (wheel / tar.gz / 两个二进制)
+# 发行说明取 RELEASE_TEMPLATE.md 里第一个 `---` 之前的内容 (与手动发版同一份模板)。
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要发布的标签 (必须已存在的 v* 标签, 如 v1.0.5)"
+        required: true
+        type: string
+      prerelease:
+        description: "强制标记为预发布 (留空 = 按标签里有没有 '-' 自动判断)"
+        required: false
+        type: choice
+        options: ["", "true", "false"]
+        default: ""
+
+permissions:
+  contents: write
+
+env:
+  PYTHON_VERSION: "3.14"
+  NUITKA_VERSION: "4.2.2"  # 固定版本: 同一个标签重跑也得到同样的二进制
+
+jobs:
+  # ---------------------------------------------------------------- 版本信息
+  prep:
+    name: 读取版本
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.var.outputs.tag }}
+      version: ${{ steps.var.outputs.version }}
+      prerelease: ${{ steps.var.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: var
+        name: 标签 / 版本 / 是否预发布
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_PRE: ${{ inputs.prerelease }}
+        run: |
+          TAG="${INPUT_TAG:-$GITHUB_REF_NAME}"
+          VER="${TAG#v}"
+          SRC=$(python3 -c "import tomllib,pathlib;print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          echo "标签 $TAG / pyproject 里的版本 $SRC"
+          if [ "$TAG" = "$VER" ]; then
+            echo "::error::标签必须以 v 开头 (如 v1.0.5), 当前: $TAG"; exit 1
+          fi
+          if [ "$SRC" != "$VER" ]; then
+            echo "::error::版本不一致: pyproject.toml 是 $SRC, 标签是 $VER (先改 pyproject.toml 与 __init__.py 再打标签)"; exit 1
+          fi
+          PRE="${INPUT_PRE:-}"
+          if [ -z "$PRE" ]; then
+            case "$VER" in *-*) PRE=true;; *) PRE=false;; esac
+          fi
+          {
+            echo "tag=$TAG"
+            echo "version=$VER"
+            echo "prerelease=$PRE"
+          } >> "$GITHUB_OUTPUT"
+          echo "预发布: $PRE"
+
+  # ---------------------------------------------------------------- uv 打包 (2 个文件)
+  packages:
+    name: wheel + 源码包
+    needs: prep
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: 构建 sdist + wheel
+        run: uv build --out-dir dist
+      - name: 实测 (隔离环境装 wheel)
+        run: |
+          uv venv --python ${{ env.PYTHON_VERSION }} /tmp/check
+          uv pip install --python /tmp/check/bin/python dist/*.whl
+          /tmp/check/bin/gitx --version
+          /tmp/check/bin/gitx publish -h >/dev/null
+      - name: 附件清单
+        run: ls -l dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: packages
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------- Nuitka 二进制 (2 个文件)
+  binaries:
+    name: Nuitka 二进制 (${{ matrix.arch }})
+    needs: prep
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04      # x86_64
+            arch: x86_64
+          - runner: ubuntu-24.04-arm  # arm64 (公开仓库免费)
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: 安装依赖 + Nuitka
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install . "nuitka==${{ env.NUITKA_VERSION }}"
+          .venv/bin/python -m nuitka --version
+      - name: Nuitka 编译 (onefile)
+        run: |
+          .venv/bin/python -m nuitka \
+            --onefile --assume-yes-for-downloads \
+            --include-package=gitx \
+            --output-dir=dist \
+            --output-filename=gitx-linux-${{ matrix.arch }} \
+            packaging/nuitka_main.py
+      - name: 冒烟测试 (二进制是真的能跑)
+        run: |
+          BIN="dist/gitx-linux-${{ matrix.arch }}"
+          "$BIN" --version
+          "$BIN" -h >/dev/null
+          "$BIN" publish -h >/dev/null
+          file "$BIN"
+          ls -lh "$BIN"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: binary-${{ matrix.arch }}
+          path: dist/gitx-linux-${{ matrix.arch }}
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------- 创建发行版
+  release:
+    name: 创建发行版
+    needs: [prep, packages, binaries]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: 组装发行说明 (模板里第一个 --- 之前的部分)
+        run: |
+          sed -n '1,/^---$/p' RELEASE_TEMPLATE.md > dist/notes.md
+          head -3 dist/notes.md
+      - name: 创建 (或补齐) 发行版
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prep.outputs.tag }}
+          VER: ${{ needs.prep.outputs.version }}
+          PRE: ${{ needs.prep.outputs.prerelease }}
+        run: |
+          ls -l dist
+          TITLE="gitx $VER"
+          if [ "$PRE" = "true" ]; then TITLE="$TITLE (pre-release)"; fi
+          # 四个附件: wheel / 源码包 / x86_64 二进制 / arm64 二进制
+          ASSETS="dist/*.whl dist/*.tar.gz dist/gitx-linux-x86_64 dist/gitx-linux-arm64"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "发行版已存在, 覆盖附件并更新说明"
+            gh release upload "$TAG" $ASSETS --clobber
+            gh release edit "$TAG" --title "$TITLE" --notes-file dist/notes.md
+          elif [ "$PRE" = "true" ]; then
+            gh release create "$TAG" $ASSETS --verify-tag --prerelease --title "$TITLE" --notes-file dist/notes.md
+          else
+            gh release create "$TAG" $ASSETS --verify-tag --title "$TITLE" --notes-file dist/notes.md
+          fi
+      - name: 上传后自检 (必须正好四个附件)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prep.outputs.tag }}
+        run: |
+          COUNT=$(gh release view "$TAG" --json assets --jq '.assets | length')
+          gh release view "$TAG" --json assets --jq '.assets[].name'
+          gh release view "$TAG"
+          if [ "$COUNT" != "4" ]; then
+            echo "::error::附件应为 4 个, 实际 $COUNT 个"; exit 1
+          fi
+          echo "发行版 $TAG 就绪 (4 个附件)"

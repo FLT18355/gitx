@@ -366,6 +366,28 @@ def delete_remote_ref(path: str, remote: str, ref: str) -> tuple[int, str]:
     return run_capture(args)
 
 
+def refresh_index(path: str = ".") -> None:
+    """刷新索引里的 stat 信息 (等价 `git status` 做的那一步).
+
+    git 在真正合并前会先 `git stash create` 存一份工作区快照 (merge.c 的 save_state)。
+    只要索引里有 "mtime/大小变了、内容没变" 的条目 (工具重写文件、只 touch 一下,
+    或边写边合并), 这次快照就会**静默**失败: `git stash create` 退出码 1 且不打印任何东西,
+    于是合并以只读的一句 "致命错误：储藏失败" 中止 —— 这是 git 自身的坑, 不是本工具的问题。
+    先刷新一次索引, 让纯 stat 变化的条目回到干净状态, 就不会踩到它。
+    """
+    subprocess.run(["git", "-C", path, "update-index", "-q", "--refresh"],
+                   check=False, capture_output=True)
+
+
+# git 在合并前做快照失败时的报错特征 (不同语言 / 版本措辞不同, 都认一下)
+STASH_FAIL_MARKS = ("stash failed", "储藏失败", "Cannot save the current worktree state")
+
+
+def is_stash_failure(output: str) -> bool:
+    """判断这条 git 报错是否来自 merge 前快照 (save_state) 失败."""
+    return any(mark in output for mark in STASH_FAIL_MARKS)
+
+
 def pull(path: str = ".", rebase: bool = False, prefix: str | None = None) -> bool:
     """拉取; prefix 非空时用 -c 临时覆盖 insteadOf 走加速(不改远程 URL).
 
@@ -373,6 +395,7 @@ def pull(path: str = ".", rebase: bool = False, prefix: str | None = None) -> bo
     裸 `git pull` 会直接报 "需指定如何调和偏离的分支" 而失败 (git 2.27+ 的行为).
     """
     args = ["git", "-C", path, *proxy_args(prefix), "pull", "--rebase" if rebase else "--no-rebase"]
+    refresh_index(path)  # 非快进的 pull 内部也会走 merge 的 save_state, 同样会踩"储藏失败"
     return subprocess.run(args).returncode == 0
 
 

@@ -259,13 +259,30 @@ def merge(branch: str, *, no_ff: bool = False, squash: bool = False,
         args.append("--squash")
     args.append(branch)
     console.step(f"合并 {branch} 到 {current}...")
-    rc, out = gitcmd.run_capture(args)
+    # 合并前 git 会自己 `git stash create` 存一份快照 (merge.c 的 save_state); 索引里有
+    # "mtime/大小变了、内容没变" 的条目时, 这次快照会静默失败, 合并随即报"储藏失败"而中止。
+    # 先刷新索引 (纯 stat 变化回到干净), 万一还是踩到就再刷新重试 —— 此时 git 还没动过
+    # 索引 / 工作区 / HEAD, 重试是安全的。
+    attempts = 3
+    for attempt in range(attempts):
+        gitcmd.refresh_index(path)
+        rc, out = gitcmd.run_capture(args)
+        if rc == 0 or not gitcmd.is_stash_failure(out):
+            break
+        if attempt < attempts - 1:
+            console.warn(f"git 存合并快照失败 (储藏失败): 有文件在合并瞬间被改写, 刷新索引后重试"
+                         f" ({attempt + 2}/{attempts})")
     if rc != 0:
         conflicts = _conflict_count(path)
         if conflicts:
             console.error(f"合并产生 {conflicts} 个冲突文件\n"
                           "  解决冲突后: gitx commit -m '合并'   (或原生 git add 后再 gitx commit)\n"
                           "  放弃合并: gitx merge --abort")
+        if gitcmd.is_stash_failure(out):
+            console.error("合并失败: " + out + "\n"
+                          "  原因: git 合并前用 `git stash create` 存快照, 只要索引里有\"mtime 变了、"
+                          "内容没变\"的条目 (别的程序在同时改写跟踪文件) 它就会静默失败\n"
+                          f"  已自动刷新索引并重试 {attempts} 次; 仍失败就先 gitx stash 再合并")
         console.error(f"合并失败: {out}")
     if squash:
         console.done(f"已把 {branch} 的改动合并进暂存区 (下一步: gitx commit -m '...')")

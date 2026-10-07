@@ -1,6 +1,6 @@
 [project]
 name = "gitx"
-version = "1.0.5-pre1"
+version = "1.0.5-pre2"
 description = "给中国人用的 GitHub 加速下载与同步工具"
 readme = "README.md"
 license = "MIT"
@@ -10,6 +10,7 @@ authors = [
 ]
 requires-python = ">=3.14"
 dependencies = [
+    "click>=8.5.0",
     "prompt-toolkit>=3.0.43",
     "questionary>=2.1.1",
     "typer>=0.27.2",

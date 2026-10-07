@@ -24,7 +24,7 @@ from . import __version__
 
 # gitx 自身的子命令; 其余词一律视为 git 透传 (含用户的 git alias)
 SUBCOMMANDS = frozenset({
-    "download", "clone", "release",
+    "download", "clone", "release", "publish",
     "push", "pull", "sync", "fetch",
     "init", "info", "undo", "graph", "lg", "branches", "tidy", "url",
     "branch", "switch", "merge", "rebase",

@@ -1,7 +1,7 @@
 ---
 name: gitx
-version: 1.0.5
-description: 给中国人用的 GitHub 加速与同步工具 —— 下载 / 同步 / 加速 / 分支 / 暂存 / 标签 / 提交 / 改动，一条命令搞定
+version: 1.0.5-pre2
+description: 给中国人用的 GitHub 加速与同步工具 —— 下载 / 同步 / 加速 / 分支 / 暂存 / 标签 / 提交 / 改动 / 发行版管理，一条命令搞定
 author: FLT18355
 repository: https://github.com/FLT18355/gitx
 license: MIT
@@ -46,6 +46,7 @@ gitx sync                            # 同步当前仓库
 | 💾 **断点续传** | 中断后重跑自动续传，不浪费流量 |
 | 🌲 **部分克隆** | 文件夹下载快 8 倍（稀疏检出） |
 | 🔁 **协作一条龙** | remote / submodule / pr 全部加速 |
+| 🏷️ **发行版管理** | `gitx publish` 创建 / 上传附件 / 编辑 / 删除（交给已登录的 gh） |
 | 🔄 **自更新** | `gitx upgrade` 查 Release 下 wheel 都走加速 |
 
 ---
@@ -65,6 +66,23 @@ gitx sync                            # 同步当前仓库
 | `gitx release <owner/repo> --tag v1.0 -a '*linux*'` | 指定标签 + 通配下载 |
 | `gitx download url1 url2 -o 目录` | 批量下载多个链接 |
 | `gitx download -f links.txt` | 从文件读取链接（`#` 注释，`-` 读 stdin） |
+
+### 🏷️ 发行版管理 (发布方 · 全部交给已登录的 `gh`)
+
+| 命令 | 说明 |
+|------|------|
+| `gitx publish [list]` | 列出发行版（含草稿与预发布）：标签/名称/状态/发布/创建 |
+| `gitx publish --no-drafts --no-prereleases` | 只看正式版 |
+| `gitx publish view [标签] [--web]` | 状态/时间/说明首行/附件清单（标签省略 = 最新） |
+| `gitx publish create <标签> [附件...] -T 标题 -F 说明.md -p` | 创建发行版并上传附件（附件支持 `dist/*` 通配） |
+| `gitx publish create <标签> dist/* -d` | 先建草稿（`edit --no-draft` 再正式发布） |
+| `gitx publish upload <标签> <文件...> [--clobber]` | 给已有发行版补传附件 |
+| `gitx publish edit <标签> [--title/--notes/--notes-file]` | 改标题与说明 |
+| `gitx publish edit <标签> --no-prerelease --latest` | 预发布转正式并设为最新 |
+| `gitx publish delete <标签> [--cleanup-tag] [-y]` | 删除发行版（`--cleanup-tag` 连标签一起删） |
+
+> 写操作需要已安装并登录的 `gh`；只**下载**附件仍用 `gitx release`（只读 + 加速，不需要 gh）。
+> `--repo/-R` 接受 `owner/repo` 或链接，可对任意仓库操作。
 
 ### 🔄 同步
 
@@ -223,6 +241,15 @@ gitx stash pop
 ```bash
 gitx tag new v1.0.0 "首个正式版"
 gitx tag push
+```
+
+### 场景 6b：发一个预发布（附件 + 说明）
+
+```bash
+uv build --out-dir dist                      # 产出 sdist + wheel
+gitx publish create v1.0.5-pre2 dist/* -T "gitx 1.0.5-pre2" -F 发布说明.md -p
+gitx publish view v1.0.5-pre2                # 确认附件与说明
+gitx publish edit v1.0.5-pre2 --no-prerelease --latest   # 转正式版
 ```
 
 ### 场景 7：查看仓库快速概览

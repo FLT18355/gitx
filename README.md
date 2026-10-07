@@ -2,6 +2,13 @@
 
 给中国人用的 GitHub 加速与同步工具 —— 下载 / 同步 / 加速, 一条命令搞定。
 
+> **v1.0.5-pre2: 发行版管理 (预发布)** ——
+> 新增 **`gitx publish`**: 发行版一条龙 —— 列表 / 详情 / **创建并上传附件** / 补传附件 / 编辑(说明·预发布·草稿·最新) / 删除,
+> 全部交给已登录的 `gh`, 本工具只拼参数、不接触写入令牌; 附件直接给构建产物(`dist/*.whl` 通配),
+> 说明可 `-F 说明.md`(`-` 读标准输入, 方便配合发布模板); 未装 / 未登录 gh 时给中文提示。
+> 下载侧照旧: `gitx release` 仍是 API + 加速的只读路径, 不需要 gh。
+> (含 v1.0.5-pre1 的 skill 优化: 表格化命令速查、快速上手指南、常见问题解答。)
+>
 > **v1.0.4: TOML 配置 + 五项新命令** ——
 > 配置文件换成人类可读的 **TOML**(`~/.config/gitx/config.toml`, 逐项中文注释, `gitx config set` 后注释不丢;
 > 旧的 `config.json` 首次运行自动迁移并保留为 `.json.bak`), 新增 `dest` / `resume` / `sync_rebase` /
@@ -18,13 +25,6 @@
 > 修好文档里承诺却一直没生效的配置项 `branch`(默认分支)—— 现在按 **`--branch` > URL 内分支 > 配置 `branch` > 远端默认分支** 依次生效;
 > `gitx stash` 列表不再显示 git 的 `On <分支>: ` 前缀; `gitx web` 对未知页面给出提示而非静默开首页;
 > `gitx url` / `gitx proxy` 检测 insteadOf 规则时不再吞掉自定义加速源的大小写; 并清掉三处死代码。
-
-> **v1.0.2: Catppuccin Mocha 主题 + 欢迎页 + 修复** ——
-> 终端配色统一为 **Catppuccin Mocha**(表格 / 面板 / 进度条 / 交互选择器同源取色, 见 `console.py` 的 `MOCHA`);
-> 只输入 `gitx` 不再刷一屏帮助, 改成版本 + 加速状态 + 常用命令速查(全量帮助仍在 `gitx -h`);
-> `gitx help [命令]` / `--install-completion` / `--show-completion` 交给 typer 正确处理;
-> 修复 `git status --porcelain` 首行被 `strip()` 吃掉行首空格 → 未暂存改动被误判为"已暂存"的统计错位,
-> 并让 `--local` 的 insteadOf 规则也能在推送时被检测到(自动改用 SSH 直连, 避免被镜像 405 拒绝)。
 
 默认走加速镜像 `https://v6.gh-proxy.org` 拉取, 推送直连 GitHub(镜像不支持推送)。
 
@@ -112,6 +112,46 @@ gitx proxy release follow       # 取消独立设置, 跟随全局加速源 (默
 ```
 
 一次性的 `--proxy <源>` / `--no-proxy` 仍然优先级最高, 对单条命令生效。
+
+### 发行版管理 (创建 / 上传 / 编辑 / 删除, 交给已登录的 gh)
+
+发布方的一条龙: 上面 `gitx release` 只管**下载**, 这里只管**发布**。写操作全部交给已登录的
+`gh`, 本工具只拼参数、不接触写入令牌(仓库写权限由 gh 自己的登录态决定);
+没装 / 没登录 gh 会给出中文提示 (只下载附件不需要 gh)。
+
+```bash
+gitx publish                            # 列出发行版 (含草稿与预发布): 标签 / 名称 / 状态 / 发布 / 创建
+gitx publish --no-drafts --no-prereleases -n 50   # 只列正式版, 最多 50 条
+gitx publish view                       # 看最新发行版: 状态 / 时间 / 说明首行 / 附件清单
+gitx publish view v1.0.5 --web          # 指定标签, 并顺手打开网页
+gitx publish create v1.0.5 dist/*.tar.gz dist/*.whl -T "gitx 1.0.5" -F 发布说明.md
+gitx publish create v1.0.5-pre2 dist/* -T "gitx 1.0.5-pre2 (预发布)" -F 说明.md -p
+gitx publish create v1.0.5 dist/*.whl -d     # 先建草稿, 检查无误后再发布
+gitx publish upload v1.0.5 dist/*.whl --clobber   # 给已有发行版补传附件 (同名先删后传)
+gitx publish edit v1.0.5 --no-draft          # 把草稿正式发布
+gitx publish edit v1.0.5 --no-prerelease --latest   # 预发布转正式, 并标记为最新
+gitx publish edit v1.0.5 -n "$(cat 新说明.md)"       # 改说明 (或 -F 新说明.md, -F - 读标准输入)
+gitx publish delete v1.0.5-pre1 --cleanup-tag       # 删除发行版(会确认), --cleanup-tag 连标签一起删
+gitx publish list --repo cli/cli -n 10       # 看别人的发行版 (owner/repo 或链接都行)
+```
+
+| 子命令 | 作用 | 常用选项 |
+| --- | --- | --- |
+| `publish` / `publish list` | 列出发行版 | `-n` 条数, `--no-drafts` / `--no-prereleases` 过滤, `-R` 目标仓库 |
+| `publish view` | 发行版详情 + 附件清单 | `--web` 打开网页, 标签留空 = 最新 |
+| `publish create` | 创建发行版并上传附件 | `-T` 标题, `-n` / `-F` 说明, `-p` 预发布, `-d` 草稿, `--target` / `--verify-tag` / `--generate-notes` / `--latest`+`--no-latest` |
+| `publish upload` | 补传附件 | `--clobber` 同名先删后传 |
+| `publish edit` | 改标题 / 说明 / 预发布 / 草稿 / 最新 | `--prerelease`+`--no-prerelease`, `--draft`+`--no-draft`, `--latest`+`--no-latest`, `--tag` 改标签名 |
+| `publish delete` | 删除发行版 | `--cleanup-tag` 连标签一起删, `-y` 跳过确认 |
+
+附件参数直接给构建产物 (`dist/*.tar.gz dist/*.whl`), 通配符由 gh 展开, 上传前本地先检查文件是否存在;
+说明可用 `-F -` 从标准输入读, 于是能和 `RELEASE_TEMPLATE.md` 的"取到第一个 `---` 为止"配合
+(用管道, 别用 `<(...)` 进程替换 —— 进程替换的 fd 不会传给 gitx 拉起的 gh, gh 会报
+`open /dev/fd/63: no such file or directory`):
+
+```bash
+sed -n '1,/^---$/p' RELEASE_TEMPLATE.md | gitx publish create v1.0.5-pre2 dist/* -p -T "gitx 1.0.5-pre2" -F -
+```
 
 ### 探索 (新)
 

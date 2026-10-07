@@ -5,6 +5,7 @@
   仓库 (init / info / commit / diff / discard / clean / undo / graph / tidy / url)
   分支 (branch / switch / merge / rebase)  暂存 (stash)  标签 (tag)
   探索 (search / stat / web / ignore)      加速 (proxy ...)  配置 (config ... / doctor)
+  发行版管理 (publish: 创建 / 上传附件 / 编辑 / 删除, 交给已登录的 gh)
 非 gitx 自己的词一律透传 git (gitx status / gitx log --oneline), 这条快速通道
 由 dispatch.py 在导入 typer 之前处理, 因此几乎瞬时完成。
 """
@@ -20,9 +21,10 @@ import typer
 from rich.markup import escape
 
 from . import (__version__, accel, branch, cache, config, console, download, gitcmd, github, hub,
-               pr, release, remote, repo, stash, submodule, sync, tag, upgrade)
+               pr, publish, release, remote, repo, stash, submodule, sync, tag, upgrade)
 
 PANEL_DL = "下载 (默认加速)"
+PANEL_PUB = "发行版管理 (创建 / 上传 / 编辑)"
 PANEL_SYNC = "同步"
 PANEL_REPO = "仓库 (提交 / 改动 / 历史)"
 PANEL_BRANCH = "分支 (切换 / 合并 / 变基)"
@@ -46,6 +48,7 @@ _EPILOG = """[key]示例[/key]
   gitx https://github.com/owner/repo -x             下载并解压源码包 (不用 git, 只取一个流)
   gitx release cli/cli --list                       看最新发布的附件清单
   gitx release cli/cli --asset '*linux_amd64*'      只下匹配的附件
+  gitx publish create v1.0.5 dist/* -p -F 说明.md    创建发行版并上传附件 (交给 gh)
   gitx search "cli 工具" --language go -d           搜仓库并下载第 1 个
   gitx stat cli/cli                                 看仓库概览 (★ star / topics / 语言 / 贡献者)
   gitx graph -n 30                                  带图形的提交历史
@@ -89,6 +92,7 @@ def _version_callback(value: bool) -> None:
 _WELCOME_TIPS: tuple[tuple[str, str], ...] = (
     ("gitx <GitHub 链接>", "下载仓库 / 文件夹 / 文件 / 源码包 (默认加速)"),
     ("gitx release owner/repo", "交互式挑选并下载 Release 附件"),
+    ("gitx publish", "发行版管理: 列表 / 创建 / 上传附件 / 编辑 / 删除"),
     ("gitx sync", "先拉取再推送, 一步完成日常同步 (默认变基)"),
     ("gitx push / gitx pull", "提交并推送 / 拉取远端更新"),
     ("gitx info", "仓库概览: 状态 / 领先落后 / 最近提交"),
@@ -947,6 +951,126 @@ def pr_create(
 
 
 app.add_typer(pr_app, name="pr", rich_help_panel=PANEL_COLLAB)
+
+
+# ================================================================ 发行版管理 (创建 / 上传 / 编辑 / 删除)
+
+publish_app = typer.Typer(help="发行版管理: 创建 / 上传附件 / 编辑 / 删除 (交给已登录的 gh)",
+                          rich_markup_mode="rich", invoke_without_command=True,
+                          context_settings={"help_option_names": ["-h", "--help"]})
+
+_REPO_HELP = "目标仓库 (owner/repo 或链接), 默认当前仓库"
+_LIMIT_HELP = "列表条数 (gh 默认 30)"
+
+
+@publish_app.callback()
+def _publish_root(
+    ctx: typer.Context,
+    limit: Annotated[int, typer.Option("--limit", "-n", help=_LIMIT_HELP)] = 30,
+    drafts: Annotated[bool, typer.Option("--drafts/--no-drafts", help="列表是否含草稿")] = True,
+    prereleases: Annotated[bool, typer.Option("--prereleases/--no-prereleases", help="列表是否含预发布")] = True,
+    repo: Annotated[str, typer.Option("--repo", "-R", help=_REPO_HELP)] = "",
+) -> None:
+    # 不带子命令 = 列出发行版 (含草稿与预发布)
+    if ctx.invoked_subcommand is None:
+        publish.list_releases(repo, limit=limit, drafts=drafts, prereleases=prereleases)
+
+
+@publish_app.command("list")
+def publish_list(
+    limit: Annotated[int, typer.Option("--limit", "-n", help=_LIMIT_HELP)] = 30,
+    drafts: Annotated[bool, typer.Option("--drafts/--no-drafts", help="是否含草稿")] = True,
+    prereleases: Annotated[bool, typer.Option("--prereleases/--no-prereleases", help="是否含预发布")] = True,
+    repo: Annotated[str, typer.Option("--repo", "-R", help=_REPO_HELP)] = "",
+) -> None:
+    """列出发行版: 标签 / 名称 / 状态 / 发布时间 (含草稿与预发布)."""
+    publish.list_releases(repo, limit=limit, drafts=drafts, prereleases=prereleases)
+
+
+@publish_app.command("view")
+def publish_view(
+    tag: Annotated[str, typer.Argument(metavar="标签", help="发行版标签; 留空 = 最新")] = "",
+    repo: Annotated[str, typer.Option("--repo", "-R", help=_REPO_HELP)] = "",
+    web: Annotated[bool, typer.Option("--web", "-w", help="在浏览器中打开发行版页面")] = False,
+) -> None:
+    """查看发行版: 状态 / 时间 / 说明首行 / 附件清单."""
+    publish.view(tag, repo, browse=web)
+
+
+@publish_app.command("create")
+def publish_create(
+    tag: Annotated[str, typer.Argument(metavar="标签", help="发行版标签, 如 v1.0.5-pre2")],
+    files: Annotated[Optional[list[str]], typer.Argument(
+        metavar="附件...", help="要上传的附件 (支持通配; 也可加 #显示名)")] = None,
+    repo: Annotated[str, typer.Option("--repo", "-R", help=_REPO_HELP)] = "",
+    title: Annotated[str, typer.Option("--title", "-T", help="发行版标题")] = "",
+    notes: Annotated[str, typer.Option("--notes", "-n", help="说明 (Markdown 文本)")] = "",
+    notes_file: Annotated[str, typer.Option("--notes-file", "-F", help="从文件读说明 (- 表示标准输入)")] = "",
+    prerelease: Annotated[bool, typer.Option("--prerelease", "-p", help="标记为预发布")] = False,
+    draft: Annotated[bool, typer.Option("--draft", "-d", help="先建为草稿, 不直接发布")] = False,
+    latest: Annotated[Optional[bool], typer.Option("--latest/--no-latest", help="是否设为最新 (默认 GitHub 自动判定)")] = None,
+    commitish: Annotated[str, typer.Option("--target", help="标签不存在时用它自动创建 (分支 / 提交)")] = "",
+    generate_notes: Annotated[bool, typer.Option("--generate-notes", help="交给 GitHub 自动生成说明")] = False,
+    verify_tag: Annotated[bool, typer.Option("--verify-tag", help="标签不存在就报错 (不自动创建)")] = False,
+) -> None:
+    """创建发行版并上传附件 (交给已登录的 gh).
+
+    附件一般给构建产物: [key]gitx publish create v1.0.5-pre2 dist/*.tar.gz dist/*.whl[/key];
+    说明用 [key]--notes-file[/key] 从文件读 ([key]-[/key] = 标准输入, 便于配合发布模板),
+    预发布加 [key]--prerelease[/key], 只想先看看加 [key]--draft[/key]。
+    """
+    publish.create(tag, list(files or []), target=repo, title=title, notes=notes,
+                   notes_file=notes_file, prerelease=prerelease, draft=draft, latest=latest,
+                   commitish=commitish, generate_notes=generate_notes, verify_tag=verify_tag)
+
+
+@publish_app.command("upload")
+def publish_upload(
+    tag: Annotated[str, typer.Argument(metavar="标签", help="发行版标签")],
+    files: Annotated[Optional[list[str]], typer.Argument(metavar="附件...", help="要上传的附件")] = None,
+    repo: Annotated[str, typer.Option("--repo", "-R", help=_REPO_HELP)] = "",
+    clobber: Annotated[bool, typer.Option("--clobber", help="同名附件先删除再上传")] = False,
+) -> None:
+    """给已有发行版补传附件."""
+    publish.upload(tag, list(files or []), target=repo, clobber=clobber)
+
+
+@publish_app.command("edit")
+def publish_edit(
+    tag: Annotated[str, typer.Argument(metavar="标签", help="发行版标签")],
+    repo: Annotated[str, typer.Option("--repo", "-R", help=_REPO_HELP)] = "",
+    new_tag: Annotated[str, typer.Option("--tag", help="把标签改成新名字")] = "",
+    title: Annotated[str, typer.Option("--title", "-T", help="新标题")] = "",
+    notes: Annotated[str, typer.Option("--notes", "-n", help="新说明 (Markdown 文本)")] = "",
+    notes_file: Annotated[str, typer.Option("--notes-file", "-F", help="从文件读新说明 (- 表示标准输入)")] = "",
+    prerelease: Annotated[Optional[bool], typer.Option("--prerelease/--no-prerelease",
+                                                       help="预发布开关")] = None,
+    draft: Annotated[Optional[bool], typer.Option("--draft/--no-draft",
+                                                  help="草稿开关 (--no-draft 即发布)")] = None,
+    latest: Annotated[Optional[bool], typer.Option("--latest/--no-latest",
+                                                   help="是否标记为最新")] = None,
+) -> None:
+    """修改发行版: 标题 / 说明 / 预发布 / 草稿 / 最新.
+
+    例: [key]gitx publish edit v1.0.5-pre2 --no-draft[/key] 把草稿正式发布,
+    [key]gitx publish edit v1.0.5-pre2 --no-prerelease --latest[/key] 转为正式版并设为最新。
+    """
+    publish.edit(tag, new_tag=new_tag, target=repo, title=title, notes=notes, notes_file=notes_file,
+                 prerelease=prerelease, draft=draft, latest=latest)
+
+
+@publish_app.command("delete")
+def publish_delete(
+    tag: Annotated[str, typer.Argument(metavar="标签", help="发行版标签")],
+    repo: Annotated[str, typer.Option("--repo", "-R", help=_REPO_HELP)] = "",
+    cleanup_tag: Annotated[bool, typer.Option("--cleanup-tag", help="连 git 标签一起删除")] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="跳过确认")] = False,
+) -> None:
+    """删除发行版 (会确认; [key]--cleanup-tag[/key] 连标签一起删)."""
+    publish.delete(tag, target=repo, cleanup_tag=cleanup_tag, yes=yes)
+
+
+app.add_typer(publish_app, name="publish", rich_help_panel=PANEL_PUB)
 
 
 # ================================================================ 加速管理

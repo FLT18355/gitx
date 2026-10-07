@@ -1,0 +1,15 @@
+{"kind":"bash_guard","toolName":"bash","outcome":"prompt_allow","severity":"high","reasons":"rm (file deletion); recursive delete (-r/-R)","ts":1791277401010}
+{"kind":"enrich","matched":false,"toolName":"bash","ts":1791277401141}
+{"kind":"enrich","matched":false,"toolName":"bash","ts":1791277434794}
+{"kind":"enrich","matched":false,"toolName":"bash","ts":1791277498030}
+{"kind":"enrich","matched":false,"toolName":"bash","ts":1791277506913}
+{"kind":"enrich","matched":false,"toolName":"bash","ts":1791277532923}
+{"kind":"enrich","matched":false,"toolName":"bash","ts":1791277538518}
+{"kind":"enrich","matched":false,"toolName":"bash","ts":1791277655335}
+{"kind":"enrich","matched":true,"rule":"command-not-found","toolName":"bash","ts":1791277656108}
+{"kind":"enrich","matched":false,"toolName":"bash","ts":1791277697806}
+{"kind":"enrich","matched":false,"toolName":"bash","ts":1791277698136}
+{"kind":"enrich","matched":false,"toolName":"bash","ts":1791277724926}
+{"kind":"bash_guard","toolName":"bash","outcome":"prompt_allow","severity":"high","reasons":"rm (file deletion); recursive delete (-r/-R)","ts":1791277838830}
+{"kind":"bash_guard","toolName":"bash","outcome":"prompt_allow","severity":"high","reasons":"rm (file deletion); recursive delete (-r/-R)","ts":1791277870589}
+{"kind":"nudge","toolName":"bash","rule":"cat-read","tool":"read","ts":1791277940712}

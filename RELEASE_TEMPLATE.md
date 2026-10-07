@@ -1,73 +1,34 @@
-# gitx v1.0.4 发布说明
+# gitx v1.0.5-pre2 发布说明
 
 ## 🎉 新增
 
-- 配置文件换成 **人类可读的 TOML** —— `~/.config/gitx/config.toml`
-  - 逐项中文注释, 按终端显示宽度对齐; `gitx config set` 改写后注释不丢
-  - 旧版 `config.json` 首次运行**自动迁移**为 TOML, 原文件保留为 `config.json.bak`
-  - 新增 `gitx config edit`(用 `$EDITOR` 直接改)与 `gitx config path`
-  - 手改坏了值会"警告一次 + 回退默认", 不再崩溃
-
-- 新增命令 **`gitx upgrade`** —— 自更新, 查 Release 与下载 wheel 都走加速
+- 新增命令 **`gitx publish`** —— 发行版管理, 全部交给已登录的 `gh`(本工具只拼参数, 不接触写入令牌)
   ```bash
-  gitx upgrade            # 更新到最新版本
-  gitx upgrade --check    # 只检查是否有新版本
-  gitx upgrade --force    # 同版本 / 更旧也强制重装
+  gitx publish                                  # 列出发行版 (含草稿与预发布)
+  gitx publish view [标签] [--web]              # 状态 / 时间 / 说明首行 / 附件清单
+  gitx publish create v1.0.5 dist/*.tar.gz dist/*.whl \
+      -T "gitx 1.0.5" -F 发布说明.md -p         # 创建发行版并上传附件 (附件支持通配)
+  gitx publish upload v1.0.5 dist/*.whl --clobber   # 给已有发行版补传附件
+  gitx publish edit v1.0.5 --no-draft           # 改标题 / 说明 / 预发布 / 草稿 / 最新
+  gitx publish delete v1.0.5 --cleanup-tag      # 删除发行版 (会确认, 可连标签一起删)
   ```
 
-- 新增命令 **`gitx remote`** —— 远程管理 (拉取加速 + 推送直连)
-  ```bash
-  gitx remote add upstream https://github.com/owner/repo
-  gitx remote set-url origin https://github.com/owner/repo
-  gitx remote show / rename / remove / list
-  # 未知参数仍透传 git: gitx remote -v
-  ```
+  - 附件直接给构建产物即可 (`dist/*.tar.gz dist/*.whl`), 通配由 gh 展开, 上传前本地先检查文件是否存在
+  - 说明用 `-n` 写文本, 或 `-F 说明.md` 从文件读(`-F -` 读标准输入, 配合发布模板 `sed -n '1,/^---$/p'`)
+  - 预发布 `-p`, 草稿 `-d`; 三态开关用 `--prerelease/--no-prerelease`、`--draft/--no-draft`、`--latest/--no-latest`
+  - `--repo/-R` 接受 `owner/repo` 或 GitHub 链接, 可对任意仓库操作; 不给就用当前仓库
+  - 未安装 / 未登录 gh 时给中文提示, 并指出**只下载附件仍用 `gitx release`(只读, 走加速, 不需要 gh)**
 
-- 新增命令 **`gitx submodule`** —— 子模组一条龙, 拉取同样走加速
-  ```bash
-  gitx submodule add https://github.com/owner/repo libs/x
-  gitx submodule update [--remote]   # 默认 --init --recursive
-  gitx submodule status / sync / remove
-  ```
-
-- 新增命令 **`gitx pr`** —— Pull Request 列表 / 详情 / 创建
-  ```bash
-  gitx pr / gitx pr list cli/cli --state all -n 30
-  gitx pr view 1234 [--web]
-  gitx pr create -t "标题" -b "正文" [--fill] [--draft]   # 交给已登录的 gh
-  ```
-
-- 新增命令 **`gitx cache`** —— 缓存查看与清理 (`~/.cache/gitx`, 可再生产数据)
-  ```bash
-  gitx cache          # 看占用
-  gitx cache clear    # 清空 (下次自动重建)
-  ```
-
-- **`gitx download` 支持批量** —— 一次下多个链接, 失败的不影响其余
-  ```bash
-  gitx download url1 url2 -o 下载目录
-  gitx download -f 链接.txt -o 下载目录     # 每行一个, # 注释, - 读标准输入
-  ```
-
-- **`gitx doctor --fix`** —— 一键修好 `core.quotepath`(中文文件名) / `pull.rebase` / 分支上游
-
-- 新增 5 项配置键: `dest`(默认下载目录) / `resume`(断点续传) / `sync_rebase`(sync 变基或合并) /
-  `color`(auto|never) / `assume_yes`(处处跳过确认)
-
-## 🔧 修复
-
-- `gitx pull` 与 `gitx sync --merge` 在分支已分歧时报"需要指定如何调和偏离的分支" ——
-  现在显式传 `--no-rebase`(git 2.27+ 未配 `pull.rebase` 时会直接报错)
-- `gitx proxy on <非法加速源>` 不再打印完整堆栈, 改为一行中文提示
-- `gitx sync_rebase=false` 的合并路径此前实际不可用, 本次一并修好并验证
+- 本版包含 v1.0.5-pre1 的 **skill 优化** (表格化命令速查 / 快速上手 / 常见问题)
 
 ## 🔧 技术细节
 
-- `config.py`: TOML 读写 + 自动迁移 + 类型校验/归一 + 显示宽度对齐的注释模板
-- `upgrade.py` / `remote.py` / `submodule.py` / `pr.py` / `cache.py`: 5 个新模块
-- `gitcmd.pull()`: 显式 `--rebase` / `--no-rebase`
-- `dispatch.py`: `remote` / `submodule` 部分接管, 未知子命令仍透传 git
-- 子模组加速复用 `git -c url.<镜像>.insteadOf`(规则不落盘); `gitx remote` 写 fetch=加速 / push=直连
+- `publish.py`: 新模块 —— 拼 `gh release list|view|create|upload|edit|delete` 参数并透传输出;
+  `list` / `view` 取 `--json` 后用 Rich 表格渲染 (状态列区分 草稿 / 预发布 / 最新 / 正式);
+  `_gh()` 统一检查 gh 是否安装且已登录, `_repo_args()` 解析 `owner/repo` 与链接
+- `cli.py`: 新增 `publish` 命令组 (list / view / create / upload / edit / delete) 与面板「发行版管理」
+- `dispatch.py`: `publish` 加入自有子命令表 (git 无同名命令, 不影响透传)
+- 下载侧一行未动: `gitx release` 仍是 API + 加速的只读路径
 
 ## 📦 安装/升级
 
@@ -76,21 +37,21 @@
 uv tool install .        # 或: uv tool install git@github.com:FLT18355/gitx.git
 
 # 方式 2: 从 Release 附件安装 (wheel)
-uv tool install gitx-1.0.4-py3-none-any.whl
+uv tool install gitx-1.0.5rc2-py3-none-any.whl
 
 # 验证
-gitx --version           # 应输出 gitx 1.0.4
-gitx doctor              # 环境自检
+gitx --version           # 应输出 gitx 1.0.5-pre2
+gitx publish             # 列出发行版 (需要已安装并登录的 gh)
 ```
 
 ## 🔗 相关
 
-- 源码: https://github.com/FLT18355/gitx/tree/v1.0.4
-- 完整变更: `git log v1.0.3..v1.0.4 --oneline`
+- 源码: https://github.com/FLT18355/gitx/tree/v1.0.5-pre2
+- 完整变更: `git log v1.0.5-pre1..v1.0.5-pre2 --oneline`
 
 ---
 
-*发布于: 2026-10-06*
+*发布于: 2026-10-07*
 
 <!-- ================================================================
      以下是发布流程规范 (不随发布说明一起贴出), 每次发版必须遵守。
@@ -121,6 +82,9 @@ ls dist/                      # 必须同时有 .tar.gz 和 .whl
 > 注意: 必须写 `--out-dir dist`。本机实测不写时 uv 会把产物写到家目录的 `~/dist`,
 > 容易和旧版本产物混在一起; 显式指定可保证 `dist/` 里只有本次版本的文件。
 
+> 文件名注意: 预发布版本会被 uv 按 PEP 440 归一化, `1.0.5-pre2` 构建出的文件名是
+> `gitx-1.0.5rc2.tar.gz` / `gitx-1.0.5rc2-py3-none-any.whl`(uv 的限制, 不是笔误), 上传实际文件名即可。
+
 ```bash
 uv run python -m zipfile -l dist/gitx-X.Y.Z-py3-none-any.whl | head   # 抽查包装内容
 gitx --version                # 应输出 gitx X.Y.Z
@@ -146,16 +110,24 @@ uv pip install -q --python /tmp/gitx-check/bin/python dist/gitx-X.Y.Z-py3-none-a
 git add -A && git commit -m "vX.Y.Z: <一句话>"
 git tag -a vX.Y.Z -m "gitx X.Y.Z"
 git push origin main && git push origin vX.Y.Z
+
+# 上传: gh 原生写法, 或本工具自己的发行版管理命令 (参数一一对应)
 gh release create vX.Y.Z \
   dist/gitx-X.Y.Z.tar.gz \
   dist/gitx-X.Y.Z-py3-none-any.whl \
   --title "gitx X.Y.Z" --notes-file <(sed -n '1,/^---$/p' RELEASE_TEMPLATE.md)
+
+gitx publish create vX.Y.Z dist/gitx-X.Y.Z.tar.gz dist/gitx-X.Y.Z-py3-none-any.whl \
+  -T "gitx X.Y.Z" [-p 预发布] [-d 草稿] -F -
+# 说明从标准输入给 (管道, 不是 <(进程替换) —— 进程替换的 fd 不会传给 gitx 拉起的 gh):
+sed -n '1,/^---$/p' RELEASE_TEMPLATE.md | gitx publish create vX.Y.Z dist/*.tar.gz dist/*.whl -T "gitx X.Y.Z" [-p] -F -
 ```
 
 ## 4. 上传后自检
 
 ```bash
 gh release view vX.Y.Z                      # 确认附件正好两个
+gitx publish view vX.Y.Z                    # 同样能看到状态与附件清单
 gh release download vX.Y.Z -p '*.whl' -D /tmp/gitx-check-dl
 uv venv -q /tmp/gitx-verify
 uv pip install -q --python /tmp/gitx-verify/bin/python /tmp/gitx-check-dl/*.whl

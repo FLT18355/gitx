@@ -73,7 +73,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.2.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: 构建 sdist + wheel

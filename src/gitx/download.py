@@ -110,7 +110,7 @@ def _download_repo(info: dict, dest: str, prefix: str | None, depth: int, branch
 # ---------------------------------------------------------------- 文件夹 (稀疏检出)
 
 def _download_folder(info: dict, dest: str, prefix: str | None, depth: int, branch_override: str) -> None:
-    import shutil  # noqa: PLC0415
+    import shutil
     import tempfile
 
     path_in_repo = info["path"]
@@ -162,7 +162,7 @@ def _download_file(info: dict, dest: str, prefix: str | None, resume: bool = Tru
 def _download_archive(info: dict, dest: str, prefix: str | None, branch_override: str,
                       extract: bool, resume: bool = True) -> None:
     """走 API 的 /tarball/<ref>: 单个 HTTP 流, 不用 git, 不要历史时最省."""
-    import shutil  # noqa: PLC0415
+    import shutil
     import tempfile
 
     owner, repo = info["owner"], info["repo"]
@@ -192,7 +192,7 @@ def _download_archive(info: dict, dest: str, prefix: str | None, branch_override
 
 def _unpack(archive: str, dest_dir: str) -> None:
     """解开 GitHub 源码包, 去掉最外层的 <repo>-<sha>/ 目录."""
-    import tarfile  # noqa: PLC0415  只 --extract 时需要
+    import tarfile  # 只 --extract 时需要
 
     with tarfile.open(archive) as tar:
         members = tar.getmembers()

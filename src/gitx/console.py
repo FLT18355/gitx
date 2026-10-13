@@ -10,7 +10,8 @@
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING, Any, NoReturn, Sequence
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from rich.console import Console
 from rich.markup import escape

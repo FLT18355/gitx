@@ -9,7 +9,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 
-from . import config, console, gitcmd, github
+from . import console, gitcmd, github
 
 STATES = ("open", "closed", "all")
 
@@ -54,7 +54,7 @@ def list_pulls(target: str = "", *, state: str = "open", limit: int = 20,
             console.txt(mark),
         )
     console.print(table)
-    console.info(f"看详情: gitx pr view <编号>   |   其它状态: --state all / closed")
+    console.info("看详情: gitx pr view <编号>   |   其它状态: --state all / closed")
 
 
 def view(number: int, target: str = "", *, prefix: str | None = None,
@@ -68,7 +68,7 @@ def view(number: int, target: str = "", *, prefix: str | None = None,
     state = "已合并" if pr.get("merged_at") else str(pr.get("state") or "")
     body = str(pr.get("body") or "").strip() or "(没有正文)"
     console.print(console.styled(
-        f"[key]#{pr.get('number')}[/key] {str(pr.get('title') or '')}  [dim]({state})[/dim]"))
+        f"[key]#{pr.get('number')}[/key] {pr.get('title') or ''!s}  [dim]({state})[/dim]"))
     console.print(console.txt(f"作者: {(pr.get('user') or {}).get('login') or ''}    "
                               f"分支: {(pr.get('head') or {}).get('ref') or ''} -> "
                               f"{(pr.get('base') or {}).get('ref') or ''}"))
@@ -106,7 +106,7 @@ def create(title: str = "", body: str = "", *, base: str = "", head: str = "",
 
 
 def _open(url: str) -> None:
-    import webbrowser  # noqa: PLC0415  只打开浏览器时才需要
+    import webbrowser  # 只打开浏览器时才需要
 
     if not webbrowser.open(url):
         console.info("未能自动打开浏览器, 请手动访问上面的链接")

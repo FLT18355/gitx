@@ -134,7 +134,7 @@ def _request(url: str, prefix: str | None, *, timeout: int, quiet: bool) -> tupl
     quiet=False 时打印失败原因并以退出码 1 结束进程 (主线数据用);
     quiet=True 时静默返回 None (可选信息用, 如"最新发布"对无发布的仓库会 404)。
     """
-    import urllib.error  # noqa: PLC0415  仅网络命令需要, 避免拖慢其它命令的启动
+    import urllib.error  # 仅网络命令需要, 避免拖慢其它命令的启动
     import urllib.request
 
     req = urllib.request.Request(accel.wrap(url, prefix), headers=dict(HEADERS))
@@ -183,7 +183,7 @@ def api_count(url: str, prefix: str | None = None, *, timeout: int = 30) -> int:
 
 def get_text(url: str, prefix: str | None = None, *, timeout: int = 30) -> str:
     """取一段纯文本 (raw 文件 / 模板); 失败时打印原因并退出."""
-    import urllib.error  # noqa: PLC0415
+    import urllib.error
     import urllib.request
 
     req = urllib.request.Request(accel.wrap(url, prefix), headers=dict(HEADERS))

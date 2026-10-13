@@ -2,10 +2,10 @@
 
 给中国人用的 GitHub 加速与同步工具 —— 下载 / 同步 / 加速, 一条命令搞定。
 
-> **v1.0.5: 官方二进制 + 发行版管理 + 全自动发版** ——
-> 每个发行版现在有 **4 个附件**: Nuitka 编译的 **`gitx-linux-x86_64` / `gitx-linux-arm64`**(单文件、免 Python 环境, 下载即可用)、
-> uv 构建的 **wheel** 与 **源码包**; 发版交给 **GitHub Actions**(推 `v*` 标签 -> 自动构建 4 个附件 -> 自动创建发行版), 以后发版只走这一条路。
+> **v1.0.5: 发行版管理 (`gitx publish`)** ——
 > 新增 **`gitx publish`**: 发行版一条龙 —— 列表 / 详情 / **创建并上传附件** / 补传附件 / 编辑(说明·预发布·草稿·最新) / 删除, 全部交给已登录的 `gh`。
+> 发行的附件就是本工具的两个构建产物(**wheel** + **源码包**), 官方安装方式是 `uv tool install`
+> (项目不再提供 Nuitka 二进制, 也没有 GitHub Actions 自动发版; 发版在本地一条命令完成, 见「发布」)。
 > 修复 **`gitx merge` / `gitx pull` 报"致命错误：储藏失败"**: git 合并前的快照 (`git stash create`) 在索引里有 "mtime 变了、内容没变" 的条目时会静默失败,
 > 现在合并 / 拉取前先刷新索引, 踩到就自动重试 (实测: 同样的干扰下裸 `git merge` 60 次失败 8 次, `gitx merge` 60 次全成功)。
 > (含 v1.0.5-pre1/pre2 的 skill 优化: 表格化命令速查、快速上手指南、常见问题解答。)
@@ -41,22 +41,18 @@ uv sync          # 创建环境并安装 (依赖 typer / rich / questionary)
 uv run gitx -h   # 或: uv run python -m gitx --help
 ```
 
-或者从 Release 附件安装 (每个版本都提供 **4 个附件**: 两个 **Nuitka 二进制** + **wheel** + **源码包**):
+或者从 Release 附件安装 (每个版本两个附件: **wheel** + **源码包**):
 
 ```bash
-# 方式 1: 二进制 —— 单文件、免 Python, 下载即可用 (URL 固定指向最新正式版)
-curl -L -o gitx https://github.com/FLT18355/gitx/releases/latest/download/gitx-linux-x86_64
-chmod +x gitx && sudo install -m755 gitx /usr/local/bin/gitx   # arm64 换成 gitx-linux-arm64
+# 方式 1: wheel (要 gitx upgrade 自更新就用这个)
+uv tool install gitx-X.Y.Z-py3-none-any.whl    # 或: uv tool install .
 
-# 方式 2: wheel (要 gitx upgrade 自更新就用这个)
-uv tool install gitx-1.0.5-py3-none-any.whl    # 或: uv tool install .
-
-# 方式 3: 源码包
-tar xf gitx-1.0.5.tar.gz && uv tool install ./gitx-1.0.5
+# 方式 2: 源码包
+tar xf gitx-X.Y.Z.tar.gz && uv tool install ./gitx-X.Y.Z
 ```
 
-> 二进制由 GitHub Actions 用 **Nuitka** 在 x86_64 与 arm64 上各编一份 (`.github/workflows/release.yml`),
-> 推 `v*` 标签即自动构建并创建发行版; 二进制版同样走加速镜像、同样能 `gitx merge` 等全套命令。
+> 两个附件由本机 `uv build --out-dir dist` 产出 (纯 Python, 不需要编译器),
+> 再用 `gitx publish create` 上传; 安装后同样走加速镜像、同样能 `gitx merge` 等全套命令。
 
 ## 用法
 
@@ -165,8 +161,9 @@ gitx publish list --repo cli/cli -n 10       # 看别人的发行版 (owner/repo
 sed -n '1,/^---$/p' RELEASE_TEMPLATE.md | gitx publish create v1.0.5 dist/*.tar.gz dist/*.whl -T "gitx 1.0.5" -F -
 ```
 
-> 正式发版走 **GitHub Actions** (`.github/workflows/release.yml`): 推一个 `v*` 标签就自动构建
-> 4 个附件并创建发行版, 不用手动敲上面的命令; `gitx publish` 适合临时补传附件 / 改说明 / 删草稿 / 看列表。
+> 发版就是这个命令: `uv build --out-dir dist` 产出 wheel + 源码包, 再
+> `sed -n '1,/^---$/p' RELEASE_TEMPLATE.md | gitx publish create <标签> dist/* -T "gitx X.Y.Z" -F -`
+> 一把建好发行版; 补传附件 / 改说明 / 删草稿 / 看列表同样交给 `gitx publish`。
 
 ### 探索 (新)
 
@@ -440,13 +437,16 @@ src/gitx/
 uv run python -m gitx --help
 uv run python -m gitx release cli/cli --list   # API + 加速 的实测例子
 uv build --out-dir dist                         # 构建 sdist + wheel (发布用)
+uvx ruff check src/gitx                         # 静态检查 (规则见 pyproject.toml 的 [tool.ruff])
 ```
 
 ## 发布
 
 按 [RELEASE_TEMPLATE.md](./RELEASE_TEMPLATE.md) 执行: 版本号双改 (`pyproject.toml` + `__init__.py`),
 `uv build --out-dir dist` 产出 `dist/gitx-X.Y.Z.tar.gz` 与 `dist/gitx-X.Y.Z-py3-none-any.whl`,
-打 tag 后用 `gh release create` **同时上传这两个附件** (源码包 + wheel), 上传后再下载验证 wheel 可安装。
+打 tag 后用 `gitx publish create <标签> dist/*.tar.gz dist/*.whl -T "gitx X.Y.Z" -F -` (或 `gh release create`)
+**同时上传这两个附件** (源码包 + wheel), 上传后再下载验证 wheel 可安装。
+预发布版本号写成 `X.Y.Z-preN` 并加 `-p` (uv 会按 PEP 440 归一化成 `rcN`, 附件名是 `gitx-X.Y.ZrcN*`, 不是笔误)。
 
 ## 许可
 

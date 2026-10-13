@@ -15,7 +15,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from typing import Annotated, Optional
+from typing import Annotated
 
 import typer
 from rich.markup import escape
@@ -145,23 +145,25 @@ def _root(
 
 @app.command("download", rich_help_panel=PANEL_DL)
 def download_cmd(
-    targets: Annotated[Optional[list[str]], typer.Argument(
+    targets: Annotated[list[str] | None, typer.Argument(
         metavar="URL|路径...",
         help="一个或多个 GitHub 链接; 只给一个链接时, 第二个参数可当保存路径")] = None,
     branch: Annotated[str, typer.Option("--branch", "-b", help="指定分支")] = "",
-    depth: Annotated[Optional[int], typer.Option("--depth", "-d", help="克隆深度, 0 = 完整克隆")] = None,
+    depth: Annotated[int | None, typer.Option("--depth", "-d", help="克隆深度, 0 = 完整克隆")] = None,
     archive: Annotated[bool, typer.Option("--archive", "-x", "--tarball",
                                           help="下载源码包 tar.gz, 不用 git (不要历史时最快)")] = False,
     extract: Annotated[bool, typer.Option("--extract", "-X", help="下载源码包并直接解压 (隐含 -x)")] = False,
     submodules: Annotated[bool, typer.Option("--submodules", help="连同子模组一起拉取 (同样走加速)")] = False,
     fresh: Annotated[bool, typer.Option("--fresh", help="忽略 .part 断点, 从零下载")] = False,
     list_only: Annotated[bool, typer.Option("--list", "-l", help="仅列出附件 (发布页链接)")] = False,
-    limit: Annotated[int, typer.Option("--limit", "-n", help="发布列表条数 (发布页链接挑选发布用, 最多 100)")] = release.DEFAULT_LIMIT,
-    assets: Annotated[Optional[list[str]], typer.Option("--asset", "-a", help="仅下载匹配的附件, 可重复")] = None,
+    limit: Annotated[int, typer.Option(
+        "--limit", "-n", help="发布列表条数 (发布页链接挑选发布用, 最多 100)")] = release.DEFAULT_LIMIT,
+    assets: Annotated[list[str] | None, typer.Option("--asset", "-a", help="仅下载匹配的附件, 可重复")] = None,
     source: Annotated[bool, typer.Option("--source", help="额外下载源码包 (发布页链接)")] = False,
-    output: Annotated[Optional[str], typer.Option("--output", "-o", help="保存路径; 多个链接或指向已存在目录 (以 / 结尾) 时作为目录")] = None,
+    output: Annotated[str | None, typer.Option(
+        "--output", "-o", help="保存路径; 多个链接或指向已存在目录 (以 / 结尾) 时作为目录")] = None,
     links_file: Annotated[str, typer.Option("--file", "-f", help="从文本文件读取链接 (每行一个, # 注释; - 表示标准输入)")] = "",
-    proxy: Annotated[Optional[str], typer.Option("--proxy", help="本次使用的加速源: v6 / v4 / gh-proxy / https://...")] = None,
+    proxy: Annotated[str | None, typer.Option("--proxy", help="本次使用的加速源: v6 / v4 / gh-proxy / https://...")] = None,
     no_proxy: Annotated[bool, typer.Option("--no-proxy", help="本次直连, 不走加速")] = False,
 ) -> None:
     """下载仓库 / 文件夹 / 单个文件 / 源码包 / Release 附件, [info]默认走加速[/info].
@@ -177,7 +179,7 @@ def download_cmd(
         urls += _read_links(links_file)
     if not urls:
         console.error("请给出至少一个 GitHub 链接 (或 gitx download <链接...> -f 链接文件)")
-    from .dispatch import is_download  # noqa: PLC0415  仅此处用来区分"链接"和"保存路径"
+    from .dispatch import is_download  # 仅此处用来区分"链接"和"保存路径"
 
     dest = output
     if dest is None and len(urls) >= 2 and not is_download(urls[-1]):
@@ -198,14 +200,15 @@ def release_cmd(
     target: Annotated[str, typer.Argument(metavar="仓库|链接", help="owner/repo 或发布页 / 附件链接")],
     tag: Annotated[str, typer.Option("--tag", "-t", help="Release 标签, 默认最新")] = "",
     tags: Annotated[bool, typer.Option("--tags", help="列出最近的 Release, 不下载")] = False,
-    limit: Annotated[int, typer.Option("--limit", "-n", help="发布列表条数 (挑选发布与 --tags 用, 最多 100)")] = release.DEFAULT_LIMIT,
-    assets: Annotated[Optional[list[str]], typer.Option("--asset", "-a", help="只下载匹配的附件 (支持通配, 可重复)")] = None,
+    limit: Annotated[int, typer.Option(
+        "--limit", "-n", help="发布列表条数 (挑选发布与 --tags 用, 最多 100)")] = release.DEFAULT_LIMIT,
+    assets: Annotated[list[str] | None, typer.Option("--asset", "-a", help="只下载匹配的附件 (支持通配, 可重复)")] = None,
     pick: Annotated[bool, typer.Option("--pick", "-i", "--choose", help="交互式挑选发布与附件 (含预发布)")] = False,
     list_only: Annotated[bool, typer.Option("--list", "-l", help="只列出附件清单, 不下载")] = False,
     source: Annotated[bool, typer.Option("--source", help="额外下载源码包 (tarball)")] = False,
     output: Annotated[str, typer.Option("--output", "-o", help="保存目录")] = ".",
     refresh: Annotated[bool, typer.Option("--fresh", help="忽略 .part 断点, 从零下载")] = False,
-    proxy: Annotated[Optional[str], typer.Option("--proxy", help="本次使用的加速源: v6 / v4 / gh-proxy / https://...")] = None,
+    proxy: Annotated[str | None, typer.Option("--proxy", help="本次使用的加速源: v6 / v4 / gh-proxy / https://...")] = None,
     no_proxy: Annotated[bool, typer.Option("--no-proxy", help="本次直连, 不走加速")] = False,
 ) -> None:
     """通过 GitHub API 列出并下载 Release 附件, [info]默认走加速[/info].
@@ -227,7 +230,7 @@ def release_cmd(
 
 @app.command(rich_help_panel=PANEL_SYNC)
 def push(
-    words: Annotated[Optional[list[str]], typer.Argument(metavar="[备注] [to <仓库地址>]",
+    words: Annotated[list[str] | None, typer.Argument(metavar="[备注] [to <仓库地址>]",
                                                          help="提交备注; 可加 to <地址> 关联远程")] = None,
     message: Annotated[str, typer.Option("--message", "-m", help="提交信息")] = "",
     force: Annotated[bool, typer.Option("--force", "-f", help="强制推送")] = False,
@@ -260,7 +263,7 @@ def pull(
 
 @app.command("sync", rich_help_panel=PANEL_SYNC)
 def sync_cmd(
-    words: Annotated[Optional[list[str]], typer.Argument(metavar="[备注]", help="提交备注")] = None,
+    words: Annotated[list[str] | None, typer.Argument(metavar="[备注]", help="提交备注")] = None,
     message: Annotated[str, typer.Option("--message", "-m", help="提交信息")] = "",
     merge: Annotated[bool, typer.Option("--merge", help="用合并而不是变基")] = False,
     force: Annotated[bool, typer.Option("--force", "-f", help="强制推送")] = False,
@@ -279,7 +282,7 @@ def sync_cmd(
              context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def init(
     ctx: typer.Context,
-    args: Annotated[Optional[list[str]], typer.Argument(metavar="[目录] [git init 参数]",
+    args: Annotated[list[str] | None, typer.Argument(metavar="[目录] [git init 参数]",
                                                         help="目录与额外的 git init 参数")] = None,
     no_zh: Annotated[bool, typer.Option("--no-zh", help="不写入中文友好配置")] = False,
 ) -> None:
@@ -298,7 +301,8 @@ def info(
 @app.command(rich_help_panel=PANEL_REPO)
 def undo(
     times: Annotated[int, typer.Argument(metavar="次数", help="撤销最近的 N 个提交")] = 1,
-    soft: Annotated[bool, typer.Option("--soft", help="改动保留在暂存区 (默认)")] = False,
+    # --soft 是默认模式 (由下面的三选一决定), 参数只为与 --mixed / --hard 对称
+    soft: Annotated[bool, typer.Option("--soft", help="改动保留在暂存区 (默认)")] = False,  # noqa: ARG001
     mixed: Annotated[bool, typer.Option("--mixed", help="改动回到工作区")] = False,
     hard: Annotated[bool, typer.Option("--hard", help="连改动一起丢弃 (会确认)")] = False,
     path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
@@ -347,7 +351,7 @@ def tidy(
 
 @app.command(rich_help_panel=PANEL_REPO)
 def url(
-    transport: Annotated[Optional[str], typer.Argument(
+    transport: Annotated[str | None, typer.Argument(
         metavar="[accel|https|ssh]", help="切换 origin 地址形态, 缺省则查看")] = None,
     remote: Annotated[str, typer.Option("--remote", "-r", help="远程名")] = "origin",
     path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
@@ -408,7 +412,7 @@ def branch_delete(
 
 @branch_app.command("upstream")
 def branch_upstream(
-    name: Annotated[Optional[str], typer.Argument(metavar="[分支]", help="缺省为当前分支")] = None,
+    name: Annotated[str | None, typer.Argument(metavar="[分支]", help="缺省为当前分支")] = None,
     set_to: Annotated[str, typer.Option("--set", help="设置上游, 如 origin/main")] = "",
     unset: Annotated[bool, typer.Option("--unset", help="取消上游关联")] = False,
     path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
@@ -434,7 +438,7 @@ def switch(
 
 @app.command(rich_help_panel=PANEL_BRANCH)
 def merge(
-    name: Annotated[Optional[str], typer.Argument(metavar="[分支]", help="要合并进来的分支")] = None,
+    name: Annotated[str | None, typer.Argument(metavar="[分支]", help="要合并进来的分支")] = None,
     no_ff: Annotated[bool, typer.Option("--no-ff", help="总是生成合并提交")] = False,
     squash: Annotated[bool, typer.Option("--squash", help="只把改动放进暂存区, 不提交")] = False,
     abort: Annotated[bool, typer.Option("--abort", help="放弃正在进行的合并")] = False,
@@ -447,7 +451,7 @@ def merge(
 
 @app.command(rich_help_panel=PANEL_BRANCH)
 def rebase(
-    onto: Annotated[Optional[str], typer.Argument(metavar="[目标]", help="变基目标 (分支 / 标签)")] = None,
+    onto: Annotated[str | None, typer.Argument(metavar="[目标]", help="变基目标 (分支 / 标签)")] = None,
     interactive: Annotated[bool, typer.Option("--interactive", "-i", help="交互式变基 (可压缩/改写提交)")] = False,
     abort: Annotated[bool, typer.Option("--abort", help="放弃正在进行的变基")] = False,
     continue_: Annotated[bool, typer.Option("--continue", help="冲突解决后继续变基")] = False,
@@ -497,7 +501,7 @@ def stash_list(
 
 @stash_app.command("save")
 def stash_save(
-    words: Annotated[Optional[list[str]], typer.Argument(metavar="[备注]", help="暂存备注")] = None,
+    words: Annotated[list[str] | None, typer.Argument(metavar="[备注]", help="暂存备注")] = None,
     include_untracked: Annotated[bool, typer.Option("--include-untracked", "-u", help="连同未跟踪文件一起暂存")] = False,
     path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
 ) -> None:
@@ -583,7 +587,7 @@ def tag_list(
 @tag_app.command("new")
 def tag_new(
     name: Annotated[str, typer.Argument(metavar="标签名", help="如 v1.0.0")],
-    words: Annotated[Optional[list[str]], typer.Argument(metavar="[说明]", help="标签说明")] = None,
+    words: Annotated[list[str] | None, typer.Argument(metavar="[说明]", help="标签说明")] = None,
     annotate: Annotated[bool, typer.Option("--annotate", "-a", help="强制附注标签 (无说明时)")] = False,
     path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
 ) -> None:
@@ -604,7 +608,7 @@ def tag_delete(
 
 @tag_app.command("push")
 def tag_push(
-    names: Annotated[Optional[list[str]], typer.Argument(metavar="[标签...]", help="缺省推送全部标签")] = None,
+    names: Annotated[list[str] | None, typer.Argument(metavar="[标签...]", help="缺省推送全部标签")] = None,
     remote: Annotated[str, typer.Option("--remote", "-r", help="远程名")] = "origin",
     path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
 ) -> None:
@@ -633,7 +637,7 @@ def commit(
 
 @app.command(rich_help_panel=PANEL_REPO)
 def diff(
-    paths: Annotated[Optional[list[str]], typer.Argument(metavar="[路径...]", help="只看这些路径")] = None,
+    paths: Annotated[list[str] | None, typer.Argument(metavar="[路径...]", help="只看这些路径")] = None,
     staged: Annotated[bool, typer.Option("--staged", "-s", help="看暂存区与 HEAD 的差异")] = False,
     stat: Annotated[bool, typer.Option("--stat", help="只看统计")] = False,
     name_only: Annotated[bool, typer.Option("--name-only", help="只列文件名")] = False,
@@ -674,9 +678,9 @@ def search(
     sort: Annotated[str, typer.Option("--sort", help="排序: stars / forks / updated")] = "stars",
     language: Annotated[str, typer.Option("--language", "-L", help="限定语言, 如 python / go")] = "",
     download: Annotated[bool, typer.Option("--download", "-d", help="直接下载选中的仓库")] = False,
-    dest: Annotated[Optional[str], typer.Option("--output", "-o", help="下载目标路径")] = None,
-    depth: Annotated[Optional[int], typer.Option("--depth", help="克隆深度, 0 = 完整克隆")] = None,
-    proxy: Annotated[Optional[str], typer.Option("--proxy", help="本次使用的加速源")] = None,
+    dest: Annotated[str | None, typer.Option("--output", "-o", help="下载目标路径")] = None,
+    depth: Annotated[int | None, typer.Option("--depth", help="克隆深度, 0 = 完整克隆")] = None,
+    proxy: Annotated[str | None, typer.Option("--proxy", help="本次使用的加速源")] = None,
     no_proxy: Annotated[bool, typer.Option("--no-proxy", help="本次直连, 不走加速")] = False,
 ) -> None:
     """搜索 GitHub 仓库 (走 API, 默认加速), [option]-d[/option] 可直接下载."""
@@ -701,10 +705,10 @@ def search(
 
 @app.command(rich_help_panel=PANEL_HUB)
 def stat(
-    target: Annotated[Optional[str], typer.Argument(
+    target: Annotated[str | None, typer.Argument(
         metavar="[仓库|链接]", help="owner/repo 或 GitHub 链接, 缺省取当前仓库 origin")] = None,
     json_out: Annotated[bool, typer.Option("--json", help="输出 JSON (脚本友好), 不渲染表格")] = False,
-    proxy: Annotated[Optional[str], typer.Option("--proxy", help="本次使用的加速源")] = None,
+    proxy: Annotated[str | None, typer.Option("--proxy", help="本次使用的加速源")] = None,
     no_proxy: Annotated[bool, typer.Option("--no-proxy", help="本次直连, 不走加速")] = False,
 ) -> None:
     """查看仓库信息: [num]star[/num] / fork / [num]topics[/num] / 语言 / 许可证 / 贡献者 / 最新发布.
@@ -718,7 +722,7 @@ def stat(
 
 @app.command(rich_help_panel=PANEL_HUB)
 def web(
-    what: Annotated[Optional[str], typer.Argument(
+    what: Annotated[str | None, typer.Argument(
         metavar="[页面]",
         help="issues / pulls / releases / actions / wiki / branch / commit, 缺省为首页")] = None,
     path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
@@ -730,12 +734,12 @@ def web(
 
 @app.command(rich_help_panel=PANEL_HUB)
 def ignore(
-    names: Annotated[Optional[list[str]], typer.Argument(
+    names: Annotated[list[str] | None, typer.Argument(
         metavar="[模板...]", help="如 python node macos")] = None,
     list_only: Annotated[bool, typer.Option("--list", "-l", help="列出可用模板")] = False,
     force: Annotated[bool, typer.Option("--force", "-f", help="覆盖已有 .gitignore")] = False,
     output: Annotated[str, typer.Option("--output", "-o", help="写入目录")] = ".",
-    proxy: Annotated[Optional[str], typer.Option("--proxy", help="本次使用的加速源")] = None,
+    proxy: Annotated[str | None, typer.Option("--proxy", help="本次使用的加速源")] = None,
     no_proxy: Annotated[bool, typer.Option("--no-proxy", help="本次直连, 不走加速")] = False,
 ) -> None:
     """从 github/gitignore 拉取 .gitignore 模板并写入 (默认追加)."""
@@ -852,7 +856,7 @@ def submodule_status(
 @submodule_app.command("add")
 def submodule_add(
     url: Annotated[str, typer.Argument(metavar="地址", help="子模组仓库链接")],
-    sub_path: Annotated[Optional[str], typer.Argument(metavar="[路径]", help="检出到哪个目录")] = None,
+    sub_path: Annotated[str | None, typer.Argument(metavar="[路径]", help="检出到哪个目录")] = None,
     name: Annotated[str, typer.Option("--name", help="子模组名 (默认取路径)")] = "",
     branch: Annotated[str, typer.Option("--branch", "-b", help="跟踪的分支")] = "",
     depth: Annotated[int, typer.Option("--depth", help="浅克隆深度, 0 = 完整")] = 0,
@@ -865,7 +869,7 @@ def submodule_add(
 
 @submodule_app.command("update")
 def submodule_update(
-    paths: Annotated[Optional[list[str]], typer.Argument(metavar="[路径...]", help="只更新指定子模组")] = None,
+    paths: Annotated[list[str] | None, typer.Argument(metavar="[路径...]", help="只更新指定子模组")] = None,
     init: Annotated[bool, typer.Option("--init/--no-init", help="未初始化的子模组也一并初始化")] = True,
     remote: Annotated[bool, typer.Option("--remote", help="跟踪子模组的远端最新提交, 而不是 .gitmodules 里锁定的提交")] = False,
     depth: Annotated[int, typer.Option("--depth", help="浅克隆深度, 0 = 完整")] = 0,
@@ -913,7 +917,7 @@ def pr_list(
     target: Annotated[str, typer.Argument(metavar="[仓库]", help="owner/repo 或链接, 缺省取当前仓库 origin")] = "",
     state: Annotated[str, typer.Option("--state", help="open / closed / all")] = "open",
     limit: Annotated[int, typer.Option("--limit", "-n", help="显示多少条 (最多 100)")] = 20,
-    proxy: Annotated[Optional[str], typer.Option("--proxy", help="本次使用的加速源")] = None,
+    proxy: Annotated[str | None, typer.Option("--proxy", help="本次使用的加速源")] = None,
     no_proxy: Annotated[bool, typer.Option("--no-proxy", help="本次直连, 不走加速")] = False,
     path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
 ) -> None:
@@ -928,7 +932,7 @@ def pr_view(
     number: Annotated[int, typer.Argument(metavar="编号", help="PR 编号")],
     target: Annotated[str, typer.Argument(metavar="[仓库]", help="owner/repo 或链接, 缺省取当前仓库")] = "",
     web: Annotated[bool, typer.Option("--web", help="同时用浏览器打开")] = False,
-    proxy: Annotated[Optional[str], typer.Option("--proxy", help="本次使用的加速源")] = None,
+    proxy: Annotated[str | None, typer.Option("--proxy", help="本次使用的加速源")] = None,
     no_proxy: Annotated[bool, typer.Option("--no-proxy", help="本次直连, 不走加速")] = False,
     path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
 ) -> None:
@@ -1000,7 +1004,7 @@ def publish_view(
 @publish_app.command("create")
 def publish_create(
     tag: Annotated[str, typer.Argument(metavar="标签", help="发行版标签, 如 v1.0.5-pre2")],
-    files: Annotated[Optional[list[str]], typer.Argument(
+    files: Annotated[list[str] | None, typer.Argument(
         metavar="附件...", help="要上传的附件 (支持通配; 也可加 #显示名)")] = None,
     repo: Annotated[str, typer.Option("--repo", "-R", help=_REPO_HELP)] = "",
     title: Annotated[str, typer.Option("--title", "-T", help="发行版标题")] = "",
@@ -1008,7 +1012,7 @@ def publish_create(
     notes_file: Annotated[str, typer.Option("--notes-file", "-F", help="从文件读说明 (- 表示标准输入)")] = "",
     prerelease: Annotated[bool, typer.Option("--prerelease", "-p", help="标记为预发布")] = False,
     draft: Annotated[bool, typer.Option("--draft", "-d", help="先建为草稿, 不直接发布")] = False,
-    latest: Annotated[Optional[bool], typer.Option("--latest/--no-latest", help="是否设为最新 (默认 GitHub 自动判定)")] = None,
+    latest: Annotated[bool | None, typer.Option("--latest/--no-latest", help="是否设为最新 (默认 GitHub 自动判定)")] = None,
     commitish: Annotated[str, typer.Option("--target", help="标签不存在时用它自动创建 (分支 / 提交)")] = "",
     generate_notes: Annotated[bool, typer.Option("--generate-notes", help="交给 GitHub 自动生成说明")] = False,
     verify_tag: Annotated[bool, typer.Option("--verify-tag", help="标签不存在就报错 (不自动创建)")] = False,
@@ -1027,7 +1031,7 @@ def publish_create(
 @publish_app.command("upload")
 def publish_upload(
     tag: Annotated[str, typer.Argument(metavar="标签", help="发行版标签")],
-    files: Annotated[Optional[list[str]], typer.Argument(metavar="附件...", help="要上传的附件")] = None,
+    files: Annotated[list[str] | None, typer.Argument(metavar="附件...", help="要上传的附件")] = None,
     repo: Annotated[str, typer.Option("--repo", "-R", help=_REPO_HELP)] = "",
     clobber: Annotated[bool, typer.Option("--clobber", help="同名附件先删除再上传")] = False,
 ) -> None:
@@ -1043,11 +1047,11 @@ def publish_edit(
     title: Annotated[str, typer.Option("--title", "-T", help="新标题")] = "",
     notes: Annotated[str, typer.Option("--notes", "-n", help="新说明 (Markdown 文本)")] = "",
     notes_file: Annotated[str, typer.Option("--notes-file", "-F", help="从文件读新说明 (- 表示标准输入)")] = "",
-    prerelease: Annotated[Optional[bool], typer.Option("--prerelease/--no-prerelease",
+    prerelease: Annotated[bool | None, typer.Option("--prerelease/--no-prerelease",
                                                        help="预发布开关")] = None,
-    draft: Annotated[Optional[bool], typer.Option("--draft/--no-draft",
+    draft: Annotated[bool | None, typer.Option("--draft/--no-draft",
                                                   help="草稿开关 (--no-draft 即发布)")] = None,
-    latest: Annotated[Optional[bool], typer.Option("--latest/--no-latest",
+    latest: Annotated[bool | None, typer.Option("--latest/--no-latest",
                                                    help="是否标记为最新")] = None,
 ) -> None:
     """修改发行版: 标题 / 说明 / 预发布 / 草稿 / 最新.
@@ -1300,7 +1304,7 @@ def _proxy_auto() -> None:
     cfg = config.load()
     console.step("正在测速 (git 克隆端点, 越小越快)...")
     probed: list[tuple[str, str | None, float, bool]] = []
-    for name, prefix in list(accel.PROVIDERS.items()) + [("off", None)]:
+    for name, prefix in [*accel.PROVIDERS.items(), ("off", None)]:
         ms, ok = accel.probe(prefix)
         probed.append((name, prefix, ms, ok))
     reachable = [(name, ms) for name, _prefix, ms, ok in probed if ok]
@@ -1336,7 +1340,7 @@ def _probe_source(name: str, *, title: str = "连通性") -> None:
         console.info(f"加速源 {name}: 直连模式, 跳过测试")
         return
     console.step(f"测试加速源: {name} ({prefix})")
-    import urllib.request  # noqa: PLC0415 仅网络命令需要, 避免拖慢其它命令
+    import urllib.request  # 仅网络命令需要, 避免拖慢其它命令
 
     table = console.table("端点", "结果", title=title)
     rc, _ = gitcmd.capture(
@@ -1457,7 +1461,7 @@ def config_path_cmd() -> None:
 @config_app.command("edit")
 def config_edit() -> None:
     """用 $VISUAL / $EDITOR 打开配置文件 (首次运行会生成带注释的模板)."""
-    import shlex  # noqa: PLC0415
+    import shlex
 
     config.ensure_file()
     editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi"
@@ -1545,7 +1549,7 @@ def doctor(
     table.add_row("配置文件", console.txt(config.config_path()))
     _, gitver = gitcmd.capture(["git", "--version"])
     table.add_row("git", console.txt(gitver or "未找到"))
-    import shutil  # noqa: PLC0415
+    import shutil
 
     gh = shutil.which("gh")
     state = ("已登录" if gitcmd.capture(["gh", "auth", "status"])[0] == 0 else "未登录") if gh else "未安装"
@@ -1607,7 +1611,7 @@ def _clear_dest(dest: str) -> None:
     if os.path.lexists(dest):
         if not console.ask(f"目标已存在: {dest}, 要覆盖吗?", default=False):
             console.error("已取消")
-        import shutil  # noqa: PLC0415  懒加载, 少一次标准库导入
+        import shutil  # 懒加载, 少一次标准库导入
 
         if os.path.isdir(dest) and not os.path.islink(dest):
             shutil.rmtree(dest)
@@ -1618,14 +1622,18 @@ def _clear_dest(dest: str) -> None:
 def _read_links(path: str) -> list[str]:
     """从文本文件读取链接 (每行一个, 空行与 # 注释跳过; - 表示标准输入)."""
     try:
-        text = sys.stdin.read() if path == "-" else open(path, encoding="utf-8").read()
+        if path == "-":
+            text = sys.stdin.read()
+        else:
+            with open(path, encoding="utf-8") as handle:
+                text = handle.read()
     except OSError as exc:
         console.error(f"读取链接文件失败: {exc}")
     return [line.strip() for line in text.splitlines()
             if line.strip() and not line.strip().startswith("#")]
 
 
-def _batch_target(url: str, dest: Optional[str]) -> Optional[str]:
+def _batch_target(url: str, dest: str | None) -> str | None:
     """批量下载时按链接算各自的保存路径 (dest 视为目录)."""
     if not dest:
         return None
@@ -1637,8 +1645,8 @@ def _batch_target(url: str, dest: Optional[str]) -> Optional[str]:
     return os.path.join(dest, name)
 
 
-def _do_download_many(urls: list[str], dest: Optional[str], depth: Optional[int], branch: str,
-                      proxy: Optional[str], no_proxy: bool, **kwargs: object) -> None:
+def _do_download_many(urls: list[str], dest: str | None, depth: int | None, branch: str,
+                      proxy: str | None, no_proxy: bool, **kwargs: object) -> None:
     """一个链接走原路径; 多个链接逐个下载, 单个失败不影响其余, 末尾汇总."""
     if len(urls) == 1:
         _do_download(urls[0], dest, depth, branch, proxy, no_proxy, **kwargs)  # type: ignore[arg-type]
@@ -1657,9 +1665,9 @@ def _do_download_many(urls: list[str], dest: Optional[str], depth: Optional[int]
     console.done(f"批量下载完成: {ok} 个链接全部成功")
 
 
-def _do_download(url: str, dest: Optional[str], depth: Optional[int], branch: str,
-                 proxy: Optional[str], no_proxy: bool, *, list_only: bool = False,
-                 assets: Optional[list[str]] = None, source: bool = False,
+def _do_download(url: str, dest: str | None, depth: int | None, branch: str,
+                 proxy: str | None, no_proxy: bool, *, list_only: bool = False,
+                 assets: list[str] | None = None, source: bool = False,
                  limit: int = release.DEFAULT_LIMIT, archive: bool = False,
                  extract: bool = False, submodules: bool = False, fresh: bool = False) -> None:
     try:

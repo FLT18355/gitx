@@ -25,7 +25,7 @@ def _head_text(path: str = ".") -> str:
     brief = gitcmd.commit_brief("HEAD", path)
     if not brief:
         return "(尚无提交)"
-    parts = (brief.split("|", 3) + ["", "", "", ""])[:4]
+    parts = [*brief.split("|", 3), "", "", "", ""][:4]
     return f"{parts[0]} ({parts[1]}, {parts[2]}) {parts[3]}"
 
 

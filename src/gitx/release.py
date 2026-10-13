@@ -117,10 +117,7 @@ def run(info: dict, dest: str, prefix: str | None, *, tag: str = "",
 
 def fetch_release(owner: str, repo: str, tag: str, prefix: str | None) -> dict:
     """按标签取单个 Release; tag 为空时取最新."""
-    if tag and tag != "latest":
-        path = f"/releases/tags/{tag}"
-    else:
-        path = "/releases/latest"
+    path = f"/releases/tags/{tag}" if tag and tag != "latest" else "/releases/latest"
     data = github.api(github.api_url(owner, repo, path), prefix)
     if not isinstance(data, dict):
         console.error("Release 数据异常, 请稍后重试")

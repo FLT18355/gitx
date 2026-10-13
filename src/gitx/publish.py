@@ -140,7 +140,7 @@ def view(tag: str = "", target: str = "", *, browse: bool = False) -> None:
     rel = _json(gh, [*args, "--json", VIEW_FIELDS], "查看发行版")
     if not isinstance(rel, dict):
         console.error("发行版数据异常, 请稍后重试")
-    head = f"[key]{rel.get('tagName') or tag or '(最新)'}[/key]  {str(rel.get('name') or '')}".rstrip()
+    head = f"[key]{rel.get('tagName') or tag or '(最新)'}[/key]  {rel.get('name') or ''!s}".rstrip()
     console.print(console.styled(f"{head}  [dim]({_state(rel)})[/dim]"))
     console.print(console.txt(
         f"发布: {str(rel.get('publishedAt') or '')[:10] or '-'}    "

@@ -70,7 +70,7 @@ def _brief_text(ref: str, path: str = ".") -> str:
     brief = gitcmd.commit_brief(ref, path)
     if not brief:
         return "(尚无提交)"
-    parts = (brief.split("|", 3) + ["", "", "", ""])[:4]
+    parts = [*brief.split("|", 3), "", "", "", ""][:4]
     return f"{parts[0]} ({parts[1]}, {parts[2]}) {parts[3]}"
 
 
@@ -146,9 +146,9 @@ def undo(times: int = 1, mode: str = "soft", path: str = ".", yes: bool = False)
     else:
         if mode == "hard":
             staged, modified, _untracked, _conflicts = gitcmd.status_counts(path)
-            if (staged or modified) and not yes:
-                if not console.ask(f"--hard 会丢弃 {staged + modified} 个文件的未提交改动, 继续?", default=False):
-                    console.error("已取消")
+            if (staged or modified) and not yes and not console.ask(
+                    f"--hard 会丢弃 {staged + modified} 个文件的未提交改动, 继续?", default=False):
+                console.error("已取消")
         if not gitcmd.reset(path, mode, f"HEAD~{times}"):
             console.error("撤销失败")
 
@@ -215,7 +215,7 @@ def graph(limit: int = 15, all_refs: bool = False, path: str = ".") -> None:
     name = os.path.basename(os.path.abspath(path))
     console.panel(body, title=f"{name} 最近 {len(lines)} 次提交"
                              + (" (全部引用)" if all_refs else ""))
-    console.info(f"更多: gitx graph -n 50 | gitx graph --all | gitx log --oneline (原生 git)")
+    console.info("更多: gitx graph -n 50 | gitx graph --all | gitx log --oneline (原生 git)")
 
 
 # ---------------------------------------------------------------- 维护 (gitx tidy)
@@ -317,7 +317,7 @@ def _transport_label(fetch: str, push: str) -> str:
         return "[dim]非 GitHub 远端[/dim]"
     if fetch.startswith("https://github.com/"):
         return "[ok]https 直连[/ok]"
-    return f"[num]加速[/num] {push.startswith('git@') and '(推送走 ssh)' or ''}".strip()
+    return f"[num]加速[/num]{' (推送走 ssh)' if push.startswith('git@') else ''}"
 
 
 # ---------------------------------------------------------------- 提交 (gitx commit)
@@ -397,10 +397,9 @@ def discard(paths: Sequence[str], *, staged: bool = False, yes: bool = False,
     gitcmd.require_repo(path)
     if not paths:
         console.error("用法: gitx discard <路径...> [--staged] [-y]")
-    if not staged and not yes:
-        if not console.ask(f"将丢弃 {len(paths)} 个路径的未提交改动 (无法恢复), 继续?",
-                           default=False):
-            console.error("已取消")
+    if not staged and not yes and not console.ask(
+            f"将丢弃 {len(paths)} 个路径的未提交改动 (无法恢复), 继续?", default=False):
+        console.error("已取消")
 
     args = ["git", "-C", path, "restore"]
     if staged:

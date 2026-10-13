@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import tomllib
@@ -154,10 +155,8 @@ def _migrate_legacy() -> None:
         data = {}
     if isinstance(data, dict):
         save(data)
-    try:
+    with contextlib.suppress(OSError):  # 旧文件动不了也不影响 (TOML 已经写好了)
         legacy.replace(legacy.with_name("config.json.bak"))
-    except OSError:
-        pass  # 旧文件动不了也不影响 (TOML 已经写好了)
 
 
 def _read_toml(path: Path) -> dict:
@@ -199,7 +198,7 @@ def toml_value(value: object) -> str:
 
 def _display_width(text: str) -> int:
     """终端显示宽度: 中文/全角算 2 列 —— 注释对齐要按它算, 不按字符数。"""
-    import unicodedata  # noqa: PLC0415  只在写配置时用
+    import unicodedata  # 只在写配置时用
 
     return sum(2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1 for ch in text)
 
@@ -244,7 +243,7 @@ def _dump(data: dict) -> str:
 def save(data: dict) -> None:
     path = config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    merged = {**DEFAULTS, **{k: v for k, v in data.items()}}
+    merged = {**DEFAULTS, **data}
     path.write_text(_dump(merged), "utf-8")
 
 

@@ -47,7 +47,13 @@ def wrap(url: str, prefix: str | None) -> str:
 
 
 def _rule_key(prefix: str, target: str) -> str:
-    return f'url."{prefix}/{target}".insteadOf'
+    """git 配置键 `url.<加速前缀>/<目标>/.insteadOf` —— 这里**不能**加引号.
+
+    传给 `git config` 的键里, subsection 的引号是**字面字符** (不是配置文件里的
+    转义语法), 写成 `url."<前缀>/<目标>".insteadOf` 会把引号一起写进规则, 之后
+    git 重写出来的地址就变成 `"<前缀>/<目标>/"owner/repo.git` (带引号, 无法使用)。
+    """
+    return f"url.{prefix}/{target}.insteadOf"
 
 
 def install_rewrite(prefix: str, scope: str = "--global") -> None:
@@ -60,13 +66,17 @@ def install_rewrite(prefix: str, scope: str = "--global") -> None:
 
 
 def uninstall_rewrite(prefix: str, scope: str = "--global") -> None:
-    """移除 install_rewrite 写入的规则(忽略不存在的 key)."""
+    """移除 install_rewrite 写入的规则(忽略不存在的 key).
+
+    1.0.5 及更早的版本把引号当字面字符写了进去 (规则实际不可用), 这里一并清掉。
+    """
     for target in TARGETS:
-        subprocess.run(
-            ["git", "config", scope, "--unset-all", _rule_key(prefix, target)],
-            check=False,
-            capture_output=True,
-        )
+        for key in (_rule_key(prefix, target), f'url."{prefix}/{target}".insteadOf'):
+            subprocess.run(
+                ["git", "config", scope, "--unset-all", key],
+                check=False,
+                capture_output=True,
+            )
 
 
 def probe(prefix: str | None, timeout: int = 20) -> tuple[float, bool]:
@@ -110,10 +120,14 @@ def installed_prefix(scope: str | None = None, path: str = "") -> str:
     for line in out.splitlines():
         key = line.split()[0]
         inner = key[len("url."):]
+        if inner.lower().endswith(".insteadof"):
+            inner = inner[: -len(".insteadof")]
+        if inner.startswith('"') and inner.endswith('"'):
+            inner = inner[1:-1]  # 老版本写进去的字面引号
         low = inner.lower()
         # key 形如: url.<prefix>/https://github.com/.insteadof (保留 prefix 原始大小写)
         for target in TARGETS:
-            suffix = f"/{target.rstrip('/')}/.insteadof"
+            suffix = f"/{target}"  # TARGETS 每项都自带结尾的 "/"
             if low.endswith(suffix.lower()):
                 return inner[: -len(suffix)]
     return ""

@@ -54,7 +54,7 @@ def fetch(url: str, dest: str, *, prefix: str | None = None, headers: dict | Non
 
 def _request(url: str, part: str, prefix: str | None, headers: dict | None, size: int,
              start: int, timeout: int, label: str) -> int:
-    import urllib.error  # noqa: PLC0415  只有真正下载时才需要
+    import urllib.error  # 只有真正下载时才需要
     import urllib.request
 
     merged = {**_UA, **(headers or {})}

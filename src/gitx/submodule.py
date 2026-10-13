@@ -122,7 +122,8 @@ def _module_name(sub_path: str, path: str) -> str:
     for line in out.splitlines():
         key, _, value = line.partition(" ")
         if value.strip().strip("/") == want:
-            return key.split(".")[1]
+            # 子模组名可以含小数点 (如 libs/a.b), 所以按前后缀剥离, 不能按 "." 切分
+            return key.removeprefix("submodule.").removesuffix(".path")
     return ""
 
 

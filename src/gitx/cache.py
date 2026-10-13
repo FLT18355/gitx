@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import shutil
 
 from . import config, console
@@ -23,10 +24,8 @@ def _files() -> list[tuple[str, int]]:
     out: list[tuple[str, int]] = []
     for path in sorted(root.rglob("*")):
         if path.is_file():
-            try:
+            with contextlib.suppress(OSError):
                 out.append((str(path.relative_to(root)), path.stat().st_size))
-            except OSError:
-                pass
     return out
 
 

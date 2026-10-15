@@ -2,10 +2,18 @@
 
 给中国人用的 GitHub 加速与同步工具 —— 下载 / 同步 / 加速, 一条命令搞定。
 
-> **v1.0.5: 官方二进制 + 发行版管理 + 全自动发版** ——
-> 每个发行版现在有 **4 个附件**: Nuitka 编译的 **`gitx-linux-x86_64` / `gitx-linux-arm64`**(单文件、免 Python 环境, 下载即可用)、
-> uv 构建的 **wheel** 与 **源码包**; 发版交给 **GitHub Actions**(推 `v*` 标签 -> 自动构建 4 个附件 -> 自动创建发行版), 以后发版只走这一条路。
+> **v1.0.6-pre1: Actions 运行与账号管理 (`gitx actions` / `gitx auth`)** ——
+> 新增 **`gitx actions`**: 工作流一条龙 —— 运行列表(按工作流 / 分支 / 状态 / 事件过滤)、详情(作业表 + `--verbose` 连步骤与耗时)、
+> 日志(`--log` / `--log-failed`)、`watch` 实时盯到结束、`rerun`(`--failed` 只重跑失败的作业)/ `cancel`、
+> `download` 下载运行产物、`workflows` 列工作流、`dispatch` 手动触发, 全部交给已登录的 `gh`;
+> 新增 **`gitx auth`**: 登录态管理 —— 状态表(当前账号标出来)/ 登录 / 退出 / 切换 / `refresh` 调权限 /
+> `token`(`--save` 顺手把令牌写进 gitx 配置, API 限额 60 → 5000 次/小时)/ `setup-git`;
+> 并把 `gh` 调用抽成共用层 `ghcli.py`: `publish` / `pr` / `actions` / `auth` 共用同一套前置检查与 JSON 解析。
+>
+> **v1.0.5: 发行版管理 (`gitx publish`)** ——
 > 新增 **`gitx publish`**: 发行版一条龙 —— 列表 / 详情 / **创建并上传附件** / 补传附件 / 编辑(说明·预发布·草稿·最新) / 删除, 全部交给已登录的 `gh`。
+> 发行的附件就是本工具的两个构建产物(**wheel** + **源码包**), 官方安装方式是 `uv tool install`
+> (项目不再提供 Nuitka 二进制, 也没有 GitHub Actions 自动发版; 发版在本地一条命令完成, 见「发布」)。
 > 修复 **`gitx merge` / `gitx pull` 报"致命错误：储藏失败"**: git 合并前的快照 (`git stash create`) 在索引里有 "mtime 变了、内容没变" 的条目时会静默失败,
 > 现在合并 / 拉取前先刷新索引, 踩到就自动重试 (实测: 同样的干扰下裸 `git merge` 60 次失败 8 次, `gitx merge` 60 次全成功)。
 > (含 v1.0.5-pre1/pre2 的 skill 优化: 表格化命令速查、快速上手指南、常见问题解答。)
@@ -41,22 +49,18 @@ uv sync          # 创建环境并安装 (依赖 typer / rich / questionary)
 uv run gitx -h   # 或: uv run python -m gitx --help
 ```
 
-或者从 Release 附件安装 (每个版本都提供 **4 个附件**: 两个 **Nuitka 二进制** + **wheel** + **源码包**):
+或者从 Release 附件安装 (每个版本两个附件: **wheel** + **源码包**):
 
 ```bash
-# 方式 1: 二进制 —— 单文件、免 Python, 下载即可用 (URL 固定指向最新正式版)
-curl -L -o gitx https://github.com/FLT18355/gitx/releases/latest/download/gitx-linux-x86_64
-chmod +x gitx && sudo install -m755 gitx /usr/local/bin/gitx   # arm64 换成 gitx-linux-arm64
+# 方式 1: wheel (要 gitx upgrade 自更新就用这个)
+uv tool install gitx-X.Y.Z-py3-none-any.whl    # 或: uv tool install .
 
-# 方式 2: wheel (要 gitx upgrade 自更新就用这个)
-uv tool install gitx-1.0.5-py3-none-any.whl    # 或: uv tool install .
-
-# 方式 3: 源码包
-tar xf gitx-1.0.5.tar.gz && uv tool install ./gitx-1.0.5
+# 方式 2: 源码包
+tar xf gitx-X.Y.Z.tar.gz && uv tool install ./gitx-X.Y.Z
 ```
 
-> 二进制由 GitHub Actions 用 **Nuitka** 在 x86_64 与 arm64 上各编一份 (`.github/workflows/release.yml`),
-> 推 `v*` 标签即自动构建并创建发行版; 二进制版同样走加速镜像、同样能 `gitx merge` 等全套命令。
+> 两个附件由本机 `uv build --out-dir dist` 产出 (纯 Python, 不需要编译器),
+> 再用 `gitx publish create` 上传; 安装后同样走加速镜像、同样能 `gitx merge` 等全套命令。
 
 ## 用法
 
@@ -165,8 +169,74 @@ gitx publish list --repo cli/cli -n 10       # 看别人的发行版 (owner/repo
 sed -n '1,/^---$/p' RELEASE_TEMPLATE.md | gitx publish create v1.0.5 dist/*.tar.gz dist/*.whl -T "gitx 1.0.5" -F -
 ```
 
-> 正式发版走 **GitHub Actions** (`.github/workflows/release.yml`): 推一个 `v*` 标签就自动构建
-> 4 个附件并创建发行版, 不用手动敲上面的命令; `gitx publish` 适合临时补传附件 / 改说明 / 删草稿 / 看列表。
+> 发版就是这个命令: `uv build --out-dir dist` 产出 wheel + 源码包, 再
+> `sed -n '1,/^---$/p' RELEASE_TEMPLATE.md | gitx publish create <标签> dist/* -T "gitx X.Y.Z" -F -`
+> 一把建好发行版; 补传附件 / 改说明 / 删草稿 / 看列表同样交给 `gitx publish`。
+
+### 工作流 Actions (交给已登录的 gh)
+
+CI 跑得怎么样、日志在哪、产物怎么拿, 一条命令看完。工作流本身跑在 GitHub 上,
+`gitx` 只负责"看与操作", 同样不接触令牌 (权限由 `gh` 的登录态决定):
+
+```bash
+gitx actions                              # 最近 20 次运行: 运行号 / 状态 / 工作流 / 标题 / 分支 / 触发 / 时间
+gitx actions -n 50 -b main -s failure      # 只看 main 分支失败的 (状态名用 gh 的: queued / success / failure ...)
+gitx actions -w build.yml -e workflow_dispatch   # 按工作流文件与触发事件过滤
+gitx actions view                         # 交互式挑一次运行看详情 (作业表: 状态 + 耗时)
+gitx actions view 1234 --verbose           # 连每个步骤一起列出来
+gitx actions view 1234 --log-failed        # 只看失败步骤的日志 (交给 gh 打印, 保留它的配色)
+gitx actions view 1234 --web              # 在浏览器打开这次运行
+gitx actions watch 1234 --compact          # 实时盯到结束 (只显示相关 / 失败的步骤)
+gitx actions rerun 1234 --failed           # 只重跑失败的作业 (含它们的依赖)
+gitx actions cancel 1234                  # 取消 (卡住不动时加 --force)
+gitx actions download 1234 -D 产物目录      # 下载运行产物 (每个产物一个子目录)
+gitx actions workflows -a                  # 列工作流: 名称 / 状态 / 路径 / 编号 (含已停用)
+gitx actions dispatch build.yml -F version=1.0.6 -r main   # 手动触发 workflow_dispatch
+```
+
+| 子命令 | 作用 | 常用选项 |
+| --- | --- | --- |
+| `actions` / `actions list` | 列出最近的运行 | `-n` 条数, `-w` 工作流, `-b` 分支, `-s` 状态, `-e` 事件, `-u` 触发人, `-R` 仓库, `-a` 含停用工作流 |
+| `actions view` | 运行详情 + 作业表 | `--verbose` 连步骤, `--job` 单看某个作业, `--attempt` 第几次尝试, `--log` / `--log-failed` / `--web`, `--exit-status` |
+| `actions watch` | 实时盯到结束 | `-i` 刷新间隔, `--compact`, `--exit-status` |
+| `actions rerun` | 重跑 | `--failed` 只重跑失败的作业, `-j` 单个作业, `--debug` |
+| `actions cancel` | 取消运行 | `--force` |
+| `actions download` | 下载运行产物 | `-D` 目录, `-N` 产物名 (可重复), `-p` 通配 |
+| `actions workflows` | 列工作流 | `-n` 条数, `-a` 含已停用 |
+| `actions dispatch` | 手动触发 | `-r` 分支/标签, `-F 键=值` (支持 `@文件`), `-f 键=值` (原样字符串), `--json` 读标准输入 |
+
+运行号可以省略: 那时由 `gh` 弹出交互式选择器让人挑 (需要终端), 直接从列表里选。
+
+### 账号 (gh 登录态)
+
+`gitx` 自己的只读 API (`search` / `stat` / `pr` 列表 / `release`) 本来就是复用 `gh` 的令牌,
+这里把登录态本身也管起来, 顺带给个把令牌喂进配置的快捷方式:
+
+```bash
+gitx auth                                # 看登录了哪些账号: 主机 / 账号 / 状态 / git 协议
+gitx auth --active                       # 只看当前账号
+gitx auth login --web                    # 浏览器登录 (不带选项则交给 gh 交互询问方式)
+echo <令牌> | gitx auth login --with-token          # 用令牌登录 (不进命令行历史)
+gitx auth logout                          # 退出登录 (多账号时由 gh 列出来挑)
+gitx auth switch                          # 切换当前账号
+gitx auth refresh -s workflow             # 补权限 (加 workflow 才能操作 Actions)
+gitx auth token                           # 打印当前令牌 (可直接接管道)
+gitx auth token --save                    # 顺手写进 gitx 配置: API 限额 60 -> 5000 次/小时
+gitx auth setup-git                       # 让 git 的 https 推送 / 拉取走 gh 的凭据
+```
+
+| 子命令 | 作用 | 常用选项 |
+| --- | --- | --- |
+| `auth` / `auth status` | 登录状态表 | `--active` 只看当前账号, `--show-token` 交给 gh 连令牌一起显示, `--hostname` (企业版) |
+| `auth login` | 登录 | `--web`, `--with-token`, `-p ssh\|https`, `-s` 额外权限, `--clipboard`, `--skip-ssh-key`, `--insecure-storage` |
+| `auth logout` | 退出登录 | 位置参数给账号名可跳过交互 |
+| `auth switch` | 切换当前账号 | 位置参数给账号名可跳过交互 |
+| `auth refresh` | 调整授权范围 | `-s` 补权限, `--remove-scopes` 收回, `--reset-scopes` 重置 |
+| `auth token` | 打印令牌 | `--save` 写进 gitx 配置, `-u` 指定账号 |
+| `auth setup-git` | 配置 git 凭据 | `--force` |
+
+登录 / 退出 / 切换 / 刷新都由 `gh` 自己做交互 (设备码、浏览器、SSH 密钥), gitx 原样透传它的输出;
+没登录时 `gitx auth` 给的是中文提示, 而不是 gh 的英文原文。
 
 ### 探索 (新)
 
@@ -412,6 +482,8 @@ gitx dowload ...            # 子命令笔误会给出形近提示
 - `gitx proxy auto` 用 `git ls-remote` 实测各加速源(含直连)克隆端点耗时, 选最快的
 - 命令分发: `gitx` 入口先走快速通道(git 透传 / --version), 其余交给 Typer 子命令;
   首词像链接(https:// / git@ )就自动补 `download`
+- 需要写权限或账号态的功能(`publish` / `actions` / `auth` / `pr create`)全部交给已登录的 `gh`:
+  gitx 只拼参数、不接触令牌, 前置检查 (是否安装 / 是否登录) 与 JSON 解析集中在 `ghcli.py` 一处
 - `gitx ignore` 复用 github/gitignore 官方模板库, 索引缓存 7 天, 按名拉取 (raw 也走加速)
 
 ## 源码结构
@@ -431,6 +503,9 @@ src/gitx/
   sync.py       push / pull / sync
   remote.py     远程管理 (拉取加速 + 推送直连)      submodule.py  子模组 (拉取同样走加速)
   pr.py         Pull Request 列表 / 详情 / 创建      cache.py      缓存查看与清理
+  ghcli.py      gh CLI 共用层 (定位 / 登录态 / 调用 / JSON 解析), publish + pr + actions + auth 共用
+  actions.py    Actions 运行与工作流 (list / view / watch / rerun / cancel / download / workflows / dispatch)
+  auth.py       账号登录态 (status / login / logout / switch / refresh / token / setup-git)
   upgrade.py    自更新 (加速下载 wheel 后 uv/pip 重装)
 ```
 
@@ -440,13 +515,16 @@ src/gitx/
 uv run python -m gitx --help
 uv run python -m gitx release cli/cli --list   # API + 加速 的实测例子
 uv build --out-dir dist                         # 构建 sdist + wheel (发布用)
+uvx ruff check src/gitx                         # 静态检查 (规则见 pyproject.toml 的 [tool.ruff])
 ```
 
 ## 发布
 
 按 [RELEASE_TEMPLATE.md](./RELEASE_TEMPLATE.md) 执行: 版本号双改 (`pyproject.toml` + `__init__.py`),
 `uv build --out-dir dist` 产出 `dist/gitx-X.Y.Z.tar.gz` 与 `dist/gitx-X.Y.Z-py3-none-any.whl`,
-打 tag 后用 `gh release create` **同时上传这两个附件** (源码包 + wheel), 上传后再下载验证 wheel 可安装。
+打 tag 后用 `gitx publish create <标签> dist/*.tar.gz dist/*.whl -T "gitx X.Y.Z" -F -` (或 `gh release create`)
+**同时上传这两个附件** (源码包 + wheel), 上传后再下载验证 wheel 可安装。
+预发布版本号写成 `X.Y.Z-preN` 并加 `-p` (uv 会按 PEP 440 归一化成 `rcN`, 附件名是 `gitx-X.Y.ZrcN*`, 不是笔误)。
 
 ## 许可
 

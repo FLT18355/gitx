@@ -3,6 +3,8 @@
 ## 前置条件
 
 - **git**（必需，仓库/同步功能的基础）
+- **gh**（可选，只有 `gitx publish` / `gitx actions` / `gitx auth` / `gitx pr create` 需要；
+  从 https://cli.github.com 安装并 `gh auth login` 后即可用于发行版管理、Actions 与账号管理）
 - **Python 3.14+**（`uv` 会自动下载对应的 CPython，无需系统预装）
 - **uv**（安装器，未装时先执行下面命令）：
 
@@ -11,28 +13,13 @@ curl -LsSf https://astral.sh/uv/install.sh | sh   # Linux/macOS
 # 或 winget install astral-sh.uv                # Windows
 ```
 
-## 安装（最快：官方二进制，不需要 Python / uv）
-
-Release 里有两个 Nuitka 编好的独立二进制（单文件，免 Python 环境）：
-
-```bash
-# x86_64 (Intel/AMD)；arm64 换成 gitx-linux-arm64
-curl -L -o gitx https://github.com/FLT18355/gitx/releases/latest/download/gitx-linux-x86_64
-chmod +x gitx
-sudo install -m755 gitx /usr/local/bin/gitx      # 或放进 ~/.local/bin
-gitx --version                                   # 预期: gitx 1.0.5
-```
-
-二进制版功能与 wheel 版一致（同样默认走加速镜像、同样能 `gitx merge` / `gitx publish` 等）；
-区别是没有 `gitx upgrade` 自更新（下载自我覆盖即可），以及体积更大（内置 Python 运行时）。
-
 ## 安装（推荐：全局命令）
 
 ```bash
 git clone https://github.com/FLT18355/gitx.git
 cd gitx
 uv tool install .        # 构建并安装到 uv 的独立 venv, 提供全局 gitx 命令
-gitx --version           # 验证 (预期: gitx 1.0.5)
+gitx --version           # 验证: 应输出版本号
 ```
 
 安装后可在任意目录直接运行 `gitx`。升级时重新执行 `uv tool install .`（会先卸载旧版）。

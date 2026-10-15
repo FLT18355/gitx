@@ -13,71 +13,20 @@
 
 from __future__ import annotations
 
-import json
 import os
-import shutil
-import subprocess
 
-from . import console, gitcmd, github
+from . import console, ghcli
 
 LIST_FIELDS = "tagName,name,isDraft,isPrerelease,isLatest,createdAt,publishedAt"
 # gh release view 的 JSON 字段集与 list 不同 (没有 isLatest)
 VIEW_FIELDS = "tagName,name,isDraft,isPrerelease,publishedAt,createdAt,body,url,assets,targetCommitish"
 
 
-# ---------------------------------------------------------------- 前置检查
+# ---------------------------------------------------------------- 本地检查
 
 def _gh() -> str:
-    """已安装且已登录的 gh 路径; 不满足时给中文提示并退出."""
-    path = shutil.which("gh")
-    if not path:
-        console.error("发行版管理需要已安装的 gh CLI (https://cli.github.com)\n"
-                      "提示: 安装并 gh auth login 之后重试; 只下载附件用 gitx release, 不需要 gh")
-    if gitcmd.capture([path, "auth", "status"])[0] != 0:
-        console.error("gh 未登录, 无法管理发行版\n提示: 先执行 gh auth login (写操作需要仓库写权限)")
-    return path
-
-
-def _repo_args(target: str) -> list[str]:
-    """--repo 参数: 接受 owner/repo 或 GitHub 链接; 留空表示当前仓库."""
-    if not target:
-        return []
-    if "://" in target or "github.com" in target:
-        parsed = github.owner_repo(target)
-        if not parsed:
-            console.error(f"无法识别仓库: {target} (形如 owner/repo)")
-    else:
-        try:
-            parsed = github.parse_repo(target)
-        except ValueError as exc:
-            console.error(f"{exc}\n用法: --repo owner/repo")
-    return ["--repo", f"{parsed[0]}/{parsed[1]}"]
-
-
-def _run(gh: str, args: list[str], action: str) -> None:
-    """跑一条 gh 命令并透传它自己的输出; 失败时补一句中文提示."""
-    if subprocess.run([gh, *args]).returncode != 0:
-        console.error(f"{action}失败 (gh 已打印原因)")
-
-
-def _capture(gh: str, args: list[str]) -> tuple[int, str, str]:
-    """跑 gh 并同时拿到 stdout / stderr (gh 的报错都写在 stderr)."""
-    try:
-        done = subprocess.run([gh, *args], capture_output=True, text=True)
-    except FileNotFoundError:
-        return 127, "", "未找到 gh"
-    return done.returncode, done.stdout or "", (done.stderr or "").strip()
-
-
-def _json(gh: str, args: list[str], action: str) -> object:
-    """跑一条 gh 命令并按 JSON 解析输出."""
-    code, out, err = _capture(gh, args)
-    if code != 0:
-        console.error(f"{action}失败\n{err}" if err else f"{action}失败")
-    try:
-        return json.loads(out)
-    except json.JSONDecodeError:
-        console.error(f"{action}失败: gh 的输出不是有效 JSON")
+    """已安装且已登录的 gh 路径 (发行版管理是写操作, 一定要登录态)."""
+    return ghcli.require("管理发行版", hint="只下载附件用 gitx release, 不需要 gh")
 
 
 def _bool_flag(name: str, value: bool | None) -> list[str]:
@@ -98,12 +47,12 @@ def list_releases(target: str = "", *, limit: int = 30,
                   drafts: bool = True, prereleases: bool = True) -> None:
     """列出发行版 (含草稿与预发布): 标签 / 名称 / 状态 / 发布时间 / 创建时间."""
     gh = _gh()
-    args = ["release", "list", "-L", str(max(1, limit)), "--json", LIST_FIELDS, *_repo_args(target)]
+    args = ["release", "list", "-L", str(max(1, limit)), "--json", LIST_FIELDS, *ghcli.repo_args(target)]
     if not drafts:
         args.append("--exclude-drafts")
     if not prereleases:
         args.append("--exclude-pre-releases")
-    data = _json(gh, args, "列出发行版")
+    data = ghcli.json_out(gh, args, "列出发行版")
     if not isinstance(data, list):
         console.error("发行版数据异常, 请稍后重试")
     if not data:
@@ -133,14 +82,14 @@ def _state(rel: dict) -> str:
 def view(tag: str = "", target: str = "", *, browse: bool = False) -> None:
     """查看单个发行版: 状态 / 时间 / 说明首行 / 附件清单 (--web 交给 gh 打开网页)."""
     gh = _gh()
-    args = ["release", "view", *([tag] if tag else []), *_repo_args(target)]
+    args = ["release", "view", *([tag] if tag else []), *ghcli.repo_args(target)]
     if browse:
-        _run(gh, [*args, "--web"], "打开发行版")
+        ghcli.run(gh, [*args, "--web"], "打开发行版")
         return
-    rel = _json(gh, [*args, "--json", VIEW_FIELDS], "查看发行版")
+    rel = ghcli.json_out(gh, [*args, "--json", VIEW_FIELDS], "查看发行版")
     if not isinstance(rel, dict):
         console.error("发行版数据异常, 请稍后重试")
-    head = f"[key]{rel.get('tagName') or tag or '(最新)'}[/key]  {str(rel.get('name') or '')}".rstrip()
+    head = f"[key]{rel.get('tagName') or tag or '(最新)'}[/key]  {rel.get('name') or ''!s}".rstrip()
     console.print(console.styled(f"{head}  [dim]({_state(rel)})[/dim]"))
     console.print(console.txt(
         f"发布: {str(rel.get('publishedAt') or '')[:10] or '-'}    "
@@ -170,7 +119,7 @@ def create(tag: str, files: list[str] | None = None, *, target: str = "", title:
     """创建发行版并上传附件 (附件支持 `dist/*.whl` 这类通配, 由 gh 展开)."""
     gh = _gh()
     args = ["release", "create", tag]
-    args += _repo_args(target)
+    args += ghcli.repo_args(target)
     if title:
         args += ["--title", title]
     if notes:
@@ -192,7 +141,7 @@ def create(tag: str, files: list[str] | None = None, *, target: str = "", title:
     args += list(files or ())
     console.step(f"创建发行版 {tag}" + (" (预发布)" if prerelease else "")
                  + (" (草稿)" if draft else "") + (f" 附件 {len(files)} 个" if files else ""))
-    _run(gh, args, "创建发行版")
+    ghcli.run(gh, args, "创建发行版")
     console.done(f"发行版 {tag} 已创建   查看: gitx publish view {tag}")
 
 
@@ -202,11 +151,11 @@ def upload(tag: str, files: list[str], *, target: str = "", clobber: bool = Fals
     if not files:
         console.error("请给出要上传的附件: gitx publish upload <标签> <文件...> [--clobber]")
     _check_files(files)
-    args = ["release", "upload", tag, *files, *_repo_args(target)]
+    args = ["release", "upload", tag, *files, *ghcli.repo_args(target)]
     if clobber:
         args.append("--clobber")
     console.step(f"上传 {len(files)} 个附件到 {tag} ...")
-    _run(gh, args, "上传附件")
+    ghcli.run(gh, args, "上传附件")
     console.done(f"已上传到发行版 {tag}")
 
 
@@ -216,7 +165,7 @@ def edit(tag: str, *, new_tag: str = "", target: str = "", title: str = "", note
     """改发行版: 标题 / 说明 / 预发布 / 草稿 / 最新 (给 --标签 即重命名标签)."""
     gh = _gh()
     args = ["release", "edit", tag]
-    args += _repo_args(target)
+    args += ghcli.repo_args(target)
     if new_tag:
         args += ["--tag", new_tag]
     if title:
@@ -229,7 +178,7 @@ def edit(tag: str, *, new_tag: str = "", target: str = "", title: str = "", note
     args += _bool_flag("--draft", draft)
     args += _bool_flag("--latest", latest)
     console.step(f"更新发行版 {tag} ...")
-    _run(gh, args, "更新发行版")
+    ghcli.run(gh, args, "更新发行版")
     console.done(f"发行版 {new_tag or tag} 已更新")
 
 
@@ -240,8 +189,8 @@ def delete(tag: str, *, target: str = "", cleanup_tag: bool = False, yes: bool =
                                    + "?", default=False):
         console.warn("已取消")
         return
-    args = ["release", "delete", tag, "-y", *_repo_args(target)]
+    args = ["release", "delete", tag, "-y", *ghcli.repo_args(target)]
     if cleanup_tag:
         args.append("--cleanup-tag")
-    _run(gh, args, "删除发行版")
+    ghcli.run(gh, args, "删除发行版")
     console.done(f"发行版 {tag} 已删除" + (" (标签一并删除)" if cleanup_tag else ""))

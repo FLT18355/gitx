@@ -6,10 +6,9 @@
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 
-from . import config, console, gitcmd, github
+from . import console, ghcli, gitcmd, github
 
 STATES = ("open", "closed", "all")
 
@@ -54,7 +53,7 @@ def list_pulls(target: str = "", *, state: str = "open", limit: int = 20,
             console.txt(mark),
         )
     console.print(table)
-    console.info(f"看详情: gitx pr view <编号>   |   其它状态: --state all / closed")
+    console.info("看详情: gitx pr view <编号>   |   其它状态: --state all / closed")
 
 
 def view(number: int, target: str = "", *, prefix: str | None = None,
@@ -68,7 +67,7 @@ def view(number: int, target: str = "", *, prefix: str | None = None,
     state = "已合并" if pr.get("merged_at") else str(pr.get("state") or "")
     body = str(pr.get("body") or "").strip() or "(没有正文)"
     console.print(console.styled(
-        f"[key]#{pr.get('number')}[/key] {str(pr.get('title') or '')}  [dim]({state})[/dim]"))
+        f"[key]#{pr.get('number')}[/key] {pr.get('title') or ''!s}  [dim]({state})[/dim]"))
     console.print(console.txt(f"作者: {(pr.get('user') or {}).get('login') or ''}    "
                               f"分支: {(pr.get('head') or {}).get('ref') or ''} -> "
                               f"{(pr.get('base') or {}).get('ref') or ''}"))
@@ -84,10 +83,8 @@ def create(title: str = "", body: str = "", *, base: str = "", head: str = "",
            fill: bool = False, draft: bool = False, path: str = ".") -> None:
     """用已登录的 gh 创建 Pull Request."""
     gitcmd.require_repo(path)
-    if not shutil.which("gh"):
-        console.error("创建 PR 需要已安装并登录 gh (https://cli.github.com)\n"
-                      "提示: gh auth login 之后重试; 也可以直接 gitx web pulls 去网页创建")
-    args = ["gh", "pr", "create"]
+    gh = ghcli.require("创建 PR", hint="也可以直接 gitx web pulls 去网页创建")
+    args = ["pr", "create"]
     if title:
         args += ["--title", title]
     if body:
@@ -101,12 +98,12 @@ def create(title: str = "", body: str = "", *, base: str = "", head: str = "",
     if draft:
         args.append("--draft")
     console.step("创建 Pull Request...")
-    if subprocess.run(args, cwd=path).returncode != 0:
+    if subprocess.run([gh, *args], cwd=path).returncode != 0:
         console.error("创建 PR 失败\n提示: 确认分支已推送 (gitx push), 或改用 gitx web pulls 在网页创建")
 
 
 def _open(url: str) -> None:
-    import webbrowser  # noqa: PLC0415  只打开浏览器时才需要
+    import webbrowser  # 只打开浏览器时才需要
 
     if not webbrowser.open(url):
         console.info("未能自动打开浏览器, 请手动访问上面的链接")

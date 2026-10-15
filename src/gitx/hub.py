@@ -88,7 +88,7 @@ def web(path: str = ".", what: str = "", *, browse: bool = True) -> str:
         url = base
     console.print(console.link(url, url))
     if browse:
-        import webbrowser  # noqa: PLC0415  导入较重 (连带 shutil), 只打开浏览器时需要
+        import webbrowser  # 导入较重 (连带 shutil), 只打开浏览器时需要
 
         if not webbrowser.open(url):
             console.info("未能自动打开浏览器, 请手动访问上面的链接")

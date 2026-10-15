@@ -1,7 +1,7 @@
 ---
 name: gitx
-version: 1.0.5
-description: 给中国人用的 GitHub 加速与同步工具 —— 下载 / 同步 / 加速 / 分支 / 暂存 / 标签 / 提交 / 改动 / 发行版管理，一条命令搞定
+version: 1.0.6-pre1
+description: 给中国人用的 GitHub 加速与同步工具 —— 下载 / 同步 / 加速 / 分支 / 暂存 / 标签 / 提交 / 改动 / 发行版 / Actions / 账号，一条命令搞定
 author: FLT18355
 repository: https://github.com/FLT18355/gitx
 license: MIT
@@ -15,13 +15,10 @@ tags: [github, git, cli, download, sync, acceleration]
 ## 快速上手 ⚡
 
 ```bash
-# 1. 安装（三种方式，任选）
-# ① 官方二进制（最快，不需要 Python/uv）
-curl -L -o gitx https://github.com/FLT18355/gitx/releases/latest/download/gitx-linux-x86_64
-chmod +x gitx && sudo install -m755 gitx /usr/local/bin/gitx
-# ② wheel（要 gitx upgrade 自更新用这个）
-uv tool install gitx-1.0.5-py3-none-any.whl
-# ③ 源码
+# 1. 安装（两种方式，任选）
+# ① wheel（推荐；要 gitx upgrade 自更新就用这个，文件名带版本号）
+uv tool install gitx-X.Y.Z-py3-none-any.whl
+# ② 源码
 git clone https://github.com/FLT18355/gitx.git && cd gitx && uv tool install .
 
 # 2. 环境自检
@@ -52,6 +49,8 @@ gitx sync                            # 同步当前仓库
 | 🌲 **部分克隆** | 文件夹下载快 8 倍（稀疏检出） |
 | 🔁 **协作一条龙** | remote / submodule / pr 全部加速 |
 | 🏷️ **发行版管理** | `gitx publish` 创建 / 上传附件 / 编辑 / 删除（交给已登录的 gh） |
+| 📋 **Actions 运行** | `gitx actions` 运行列表 / 详情 / 日志 / 盯 / 重跑 / 产物下载 / 手动触发（交给 gh） |
+| 🔑 **账号管理** | `gitx auth` 登录态 / 登录 / 切换 / 权限 / 令牌（`token --save` 提升 API 限额） |
 | 🔄 **自更新** | `gitx upgrade` 查 Release 下 wheel 都走加速 |
 
 ---
@@ -88,6 +87,40 @@ gitx sync                            # 同步当前仓库
 
 > 写操作需要已安装并登录的 `gh`；只**下载**附件仍用 `gitx release`（只读 + 加速，不需要 gh）。
 > `--repo/-R` 接受 `owner/repo` 或链接，可对任意仓库操作。
+
+### 📋 工作流 (Actions · 全部交给已登录的 `gh`)
+
+| 命令 | 说明 |
+|------|------|
+| `gitx actions [list] [-n 20]` | 最近运行：运行号 / 状态 / 工作流 / 标题 / 分支 / 触发 / 时间 |
+| `gitx actions -w build.yml -b main -s failure` | 按工作流 / 分支 / 状态过滤（状态名同 gh：`queued`/`success`/`failure`…） |
+| `gitx actions -e push -u 用户名 -R owner/repo` | 按触发事件 / 触发人过滤；`-R` 操作任意仓库 |
+| `gitx actions view [运行号]` | 详情：标题 / 分支 / 耗时 + 作业表（留空由 gh 交互挑选） |
+| `gitx actions view <运行号> --verbose` | 连每个步骤一起列出来（步骤名 + 状态 + 耗时） |
+| `gitx actions view <运行号> --log-failed` | 只看失败步骤的日志（`--log` 全量，`--web` 打开网页） |
+| `gitx actions watch <运行号> [--compact] [-i 5]` | 实时盯到结束（`--exit-status` 失败返回非 0） |
+| `gitx actions rerun <运行号> [--failed]` | 重跑（`--failed` 只重跑失败的作业，`-j` 单个作业，`--debug`） |
+| `gitx actions cancel <运行号> [--force]` | 取消运行 |
+| `gitx actions download <运行号> [-D 目录] [-N 产物名] [-p 通配]` | 下载运行产物（每个产物一个子目录） |
+| `gitx actions workflows [-a] [-n 50]` | 列工作流：名称 / 状态 / 路径 / 编号（`-a` 含已停用） |
+| `gitx actions dispatch <工作流> [-r 分支] [-F 键=值]` | 手动触发 `workflow_dispatch`（`-F` 支持 `@文件`；`-f` 原样字符串） |
+
+> 运行号省略时由 `gh` 弹出选择器让人挑（需要终端）；日志与 `watch` 的输出由 gh 原样打印（保留配色）。
+
+### 🔑 账号 (gh 登录态)
+
+| 命令 | 说明 |
+|------|------|
+| `gitx auth [status]` | 登录了哪些账号：主机 / 账号 / 状态 / git 协议（当前账号标出来） |
+| `gitx auth --active` | 只看当前账号（`--show-token` 交给 gh 连令牌一起显示） |
+| `gitx auth login [--web\|--with-token] [-p ssh\|https]` | 登录（不带选项交给 gh 交互询问；`-s` 追加权限） |
+| `gitx auth logout [账号]` / `gitx auth switch [账号]` | 退出 / 切换当前账号 |
+| `gitx auth refresh -s workflow` | 调整授权范围（`--remove-scopes` / `--reset-scopes`） |
+| `gitx auth token [--save]` | 打印令牌；`--save` 写进 gitx 配置（API 限额 60 → 5000 次/小时） |
+| `gitx auth setup-git` | 让 git 的 https 推送 / 拉取走 gh 的凭据 |
+
+> 登录 / 退出 / 切换 / 刷新都由 `gh` 自己做交互（设备码 / 浏览器 / SSH 密钥），gitx 只透传输出；
+> 没登录时 `gitx auth` 给中文提示。`--hostname` 供 GitHub Enterprise 使用。
 
 ### 🔄 同步
 
@@ -257,6 +290,24 @@ gitx publish view v1.0.5-pre2                # 确认附件与说明
 gitx publish edit v1.0.5-pre2 --no-prerelease --latest   # 转正式版
 ```
 
+### 场景 6c：CI 跑挂了，看日志、重跑、拿产物
+
+```bash
+gitx actions                          # 看最近运行（状态列直接显示 成功 / 失败 / 进行中）
+gitx actions view --log-failed         # 交互式挑一次运行，只看失败步骤的日志
+gitx actions rerun --failed            # 只重跑失败的作业
+gitx actions download -D 产物目录      # 把运行产物（附件）下载下来
+gitx actions dispatch release.yml      # 手动触发一次 workflow_dispatch
+```
+
+### 场景 6d：换个账号 / 把令牌喂给 gitx
+
+```bash
+gitx auth                     # 看当前是哪个账号
+gitx auth switch              # 切换当前账号（多账号时）
+gitx auth token --save        # 令牌写进 gitx 配置，只读 API 限额 60 -> 5000 次/小时
+```
+
 ### 场景 7：查看仓库快速概览
 
 ```bash
@@ -316,7 +367,7 @@ GITX_RELEASE_PROXY=off|v6|v4|gh-proxy|...
 | `resume` | `true` | 断点续传开关 |
 | `message` | `"日常同步更新"` | push 默认提交信息 |
 | `sync_rebase` | `true` | `gitx sync` 用变基（`false` = 合并） |
-| `token` | 空 | GitHub API token（限额 60 → 5000 次/小时） |
+| `token` | 空 | GitHub API token（限额 60 → 5000 次/小时；`gitx auth token --save` 一键写入） |
 | `color` | `auto` | 彩色输出开关 |
 | `assume_yes` | `false` | 跳过所有确认（相当于全局 `-y`） |
 

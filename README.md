@@ -2,6 +2,14 @@
 
 给中国人用的 GitHub 加速与同步工具 —— 下载 / 同步 / 加速, 一条命令搞定。
 
+> **v1.0.6-pre1: Actions 运行与账号管理 (`gitx actions` / `gitx auth`)** ——
+> 新增 **`gitx actions`**: 工作流一条龙 —— 运行列表(按工作流 / 分支 / 状态 / 事件过滤)、详情(作业表 + `--verbose` 连步骤与耗时)、
+> 日志(`--log` / `--log-failed`)、`watch` 实时盯到结束、`rerun`(`--failed` 只重跑失败的作业)/ `cancel`、
+> `download` 下载运行产物、`workflows` 列工作流、`dispatch` 手动触发, 全部交给已登录的 `gh`;
+> 新增 **`gitx auth`**: 登录态管理 —— 状态表(当前账号标出来)/ 登录 / 退出 / 切换 / `refresh` 调权限 /
+> `token`(`--save` 顺手把令牌写进 gitx 配置, API 限额 60 → 5000 次/小时)/ `setup-git`;
+> 并把 `gh` 调用抽成共用层 `ghcli.py`: `publish` / `pr` / `actions` / `auth` 共用同一套前置检查与 JSON 解析。
+>
 > **v1.0.5: 发行版管理 (`gitx publish`)** ——
 > 新增 **`gitx publish`**: 发行版一条龙 —— 列表 / 详情 / **创建并上传附件** / 补传附件 / 编辑(说明·预发布·草稿·最新) / 删除, 全部交给已登录的 `gh`。
 > 发行的附件就是本工具的两个构建产物(**wheel** + **源码包**), 官方安装方式是 `uv tool install`
@@ -164,6 +172,71 @@ sed -n '1,/^---$/p' RELEASE_TEMPLATE.md | gitx publish create v1.0.5 dist/*.tar.
 > 发版就是这个命令: `uv build --out-dir dist` 产出 wheel + 源码包, 再
 > `sed -n '1,/^---$/p' RELEASE_TEMPLATE.md | gitx publish create <标签> dist/* -T "gitx X.Y.Z" -F -`
 > 一把建好发行版; 补传附件 / 改说明 / 删草稿 / 看列表同样交给 `gitx publish`。
+
+### 工作流 Actions (交给已登录的 gh)
+
+CI 跑得怎么样、日志在哪、产物怎么拿, 一条命令看完。工作流本身跑在 GitHub 上,
+`gitx` 只负责"看与操作", 同样不接触令牌 (权限由 `gh` 的登录态决定):
+
+```bash
+gitx actions                              # 最近 20 次运行: 运行号 / 状态 / 工作流 / 标题 / 分支 / 触发 / 时间
+gitx actions -n 50 -b main -s failure      # 只看 main 分支失败的 (状态名用 gh 的: queued / success / failure ...)
+gitx actions -w build.yml -e workflow_dispatch   # 按工作流文件与触发事件过滤
+gitx actions view                         # 交互式挑一次运行看详情 (作业表: 状态 + 耗时)
+gitx actions view 1234 --verbose           # 连每个步骤一起列出来
+gitx actions view 1234 --log-failed        # 只看失败步骤的日志 (交给 gh 打印, 保留它的配色)
+gitx actions view 1234 --web              # 在浏览器打开这次运行
+gitx actions watch 1234 --compact          # 实时盯到结束 (只显示相关 / 失败的步骤)
+gitx actions rerun 1234 --failed           # 只重跑失败的作业 (含它们的依赖)
+gitx actions cancel 1234                  # 取消 (卡住不动时加 --force)
+gitx actions download 1234 -D 产物目录      # 下载运行产物 (每个产物一个子目录)
+gitx actions workflows -a                  # 列工作流: 名称 / 状态 / 路径 / 编号 (含已停用)
+gitx actions dispatch build.yml -F version=1.0.6 -r main   # 手动触发 workflow_dispatch
+```
+
+| 子命令 | 作用 | 常用选项 |
+| --- | --- | --- |
+| `actions` / `actions list` | 列出最近的运行 | `-n` 条数, `-w` 工作流, `-b` 分支, `-s` 状态, `-e` 事件, `-u` 触发人, `-R` 仓库, `-a` 含停用工作流 |
+| `actions view` | 运行详情 + 作业表 | `--verbose` 连步骤, `--job` 单看某个作业, `--attempt` 第几次尝试, `--log` / `--log-failed` / `--web`, `--exit-status` |
+| `actions watch` | 实时盯到结束 | `-i` 刷新间隔, `--compact`, `--exit-status` |
+| `actions rerun` | 重跑 | `--failed` 只重跑失败的作业, `-j` 单个作业, `--debug` |
+| `actions cancel` | 取消运行 | `--force` |
+| `actions download` | 下载运行产物 | `-D` 目录, `-N` 产物名 (可重复), `-p` 通配 |
+| `actions workflows` | 列工作流 | `-n` 条数, `-a` 含已停用 |
+| `actions dispatch` | 手动触发 | `-r` 分支/标签, `-F 键=值` (支持 `@文件`), `-f 键=值` (原样字符串), `--json` 读标准输入 |
+
+运行号可以省略: 那时由 `gh` 弹出交互式选择器让人挑 (需要终端), 直接从列表里选。
+
+### 账号 (gh 登录态)
+
+`gitx` 自己的只读 API (`search` / `stat` / `pr` 列表 / `release`) 本来就是复用 `gh` 的令牌,
+这里把登录态本身也管起来, 顺带给个把令牌喂进配置的快捷方式:
+
+```bash
+gitx auth                                # 看登录了哪些账号: 主机 / 账号 / 状态 / git 协议
+gitx auth --active                       # 只看当前账号
+gitx auth login --web                    # 浏览器登录 (不带选项则交给 gh 交互询问方式)
+echo <令牌> | gitx auth login --with-token          # 用令牌登录 (不进命令行历史)
+gitx auth logout                          # 退出登录 (多账号时由 gh 列出来挑)
+gitx auth switch                          # 切换当前账号
+gitx auth refresh -s workflow             # 补权限 (加 workflow 才能操作 Actions)
+gitx auth token                           # 打印当前令牌 (可直接接管道)
+gitx auth token --save                    # 顺手写进 gitx 配置: API 限额 60 -> 5000 次/小时
+gitx auth setup-git                       # 让 git 的 https 推送 / 拉取走 gh 的凭据
+```
+
+| 子命令 | 作用 | 常用选项 |
+| --- | --- | --- |
+| `auth` / `auth status` | 登录状态表 | `--active` 只看当前账号, `--show-token` 交给 gh 连令牌一起显示, `--hostname` (企业版) |
+| `auth login` | 登录 | `--web`, `--with-token`, `-p ssh\|https`, `-s` 额外权限, `--clipboard`, `--skip-ssh-key`, `--insecure-storage` |
+| `auth logout` | 退出登录 | 位置参数给账号名可跳过交互 |
+| `auth switch` | 切换当前账号 | 位置参数给账号名可跳过交互 |
+| `auth refresh` | 调整授权范围 | `-s` 补权限, `--remove-scopes` 收回, `--reset-scopes` 重置 |
+| `auth token` | 打印令牌 | `--save` 写进 gitx 配置, `-u` 指定账号 |
+| `auth setup-git` | 配置 git 凭据 | `--force` |
+
+登录 / 退出 / 切换 / 刷新都由 `gh` 自己做交互 (设备码、浏览器、SSH 密钥), gitx 原样透传它的输出;
+没登录时 `gitx auth` 给的是中文提示, 而不是 gh 的英文原文。
 
 ### 探索 (新)
 
@@ -409,6 +482,8 @@ gitx dowload ...            # 子命令笔误会给出形近提示
 - `gitx proxy auto` 用 `git ls-remote` 实测各加速源(含直连)克隆端点耗时, 选最快的
 - 命令分发: `gitx` 入口先走快速通道(git 透传 / --version), 其余交给 Typer 子命令;
   首词像链接(https:// / git@ )就自动补 `download`
+- 需要写权限或账号态的功能(`publish` / `actions` / `auth` / `pr create`)全部交给已登录的 `gh`:
+  gitx 只拼参数、不接触令牌, 前置检查 (是否安装 / 是否登录) 与 JSON 解析集中在 `ghcli.py` 一处
 - `gitx ignore` 复用 github/gitignore 官方模板库, 索引缓存 7 天, 按名拉取 (raw 也走加速)
 
 ## 源码结构
@@ -428,6 +503,9 @@ src/gitx/
   sync.py       push / pull / sync
   remote.py     远程管理 (拉取加速 + 推送直连)      submodule.py  子模组 (拉取同样走加速)
   pr.py         Pull Request 列表 / 详情 / 创建      cache.py      缓存查看与清理
+  ghcli.py      gh CLI 共用层 (定位 / 登录态 / 调用 / JSON 解析), publish + pr + actions + auth 共用
+  actions.py    Actions 运行与工作流 (list / view / watch / rerun / cancel / download / workflows / dispatch)
+  auth.py       账号登录态 (status / login / logout / switch / refresh / token / setup-git)
   upgrade.py    自更新 (加速下载 wheel 后 uv/pip 重装)
 ```
 

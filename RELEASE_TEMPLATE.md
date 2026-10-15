@@ -1,44 +1,73 @@
-# gitx vX.Y.Z 发布说明
-
-> 这是**模板**: 本文件第一个 `---` 之前的内容就是贴进发行版的说明 (`sed -n '1,/^---$/p'`),
-> 发版时把 `X.Y.Z` 换成实际版本号, 按小节填本版内容, 空小节整段删掉 (别把占位符发出去)。
+# gitx v1.0.6-pre1 发布说明
 
 ## 🎉 新增
 
-- **<一句话亮点>** —— <用户能看到的变化, 可直接复制粘贴的命令示例>
+- **`gitx actions`: Actions 运行一条龙** —— 不再需要开网页看 CI: 运行列表 / 详情(作业表与耗时, `--verbose` 连步骤) /
+  日志 / 实时盯 / 重跑 / 取消 / 产物下载 / 工作流列表 / 手动触发, 全部交给已登录的 `gh`。
+
+  ```bash
+  gitx actions                          # 最近运行: 状态 / 工作流 / 标题 / 分支 / 触发 / 时间
+  gitx actions -b main -s failure        # 只看 main 上失败的
+  gitx actions view 1234 --verbose       # 作业 + 步骤 + 每步耗时
+  gitx actions view 1234 --log-failed    # 只看失败步骤的日志
+  gitx actions rerun 1234 --failed       # 只重跑失败的作业
+  gitx actions download 1234 -D 产物目录  # 下载运行产物
+  gitx actions dispatch build.yml -F version=1.0.6   # 手动触发 workflow_dispatch
+  ```
+
+- **`gitx auth`: 账号与登录态** —— 状态表(当前账号标出来) / 登录 / 退出 / 切换 / 调权限 / 取令牌 / 配 git 凭据;
+  `gitx auth token --save` 把 gh 的令牌写进 gitx 配置, 只读 API 限额从 60 次/小时升到 5000 次/小时。
+
+  ```bash
+  gitx auth                      # 登录了哪些账号
+  gitx auth login --web          # 浏览器登录
+  gitx auth switch               # 切换当前账号
+  gitx auth refresh -s workflow  # 补权限
+  gitx auth token --save         # 令牌进 gitx 配置 (API 限额 60 -> 5000)
+  ```
 
   | 附件 | 说明 |
   | --- | --- |
-  | `gitx-X.Y.Z-py3-none-any.whl` | uv 构建的 wheel (`uv tool install <whl>`, 支持 `gitx upgrade` 自更新) |
-  | `gitx-X.Y.Z.tar.gz` | 源码包 (审计源码 / 无 wheel 环境) |
+  | `gitx-1.0.6rc1-py3-none-any.whl` | uv 构建的 wheel (`uv tool install <whl>`, 支持 `gitx upgrade` 自更新) |
+  | `gitx-1.0.6rc1.tar.gz` | 源码包 (审计源码 / 无 wheel 环境) |
 
-## 🔧 修复
+## ♻️ 技术细节
 
-- **`<命令>` 的 `<症状>`** —— <根因 (哪一行 git 行为导致的)>; 现在 <新行为>。
-  <有实测数字就写上: 裸 git N 次里失败 M 次, gitx N 次全成功>
+- 新增 `ghcli.py`: `gh` 共用层 —— `find` / `require`(安装 + 登录检查) / `run` / `capture` / `json_out` /
+  `repo_args`; 原来散在 `publish.py` 与 `pr.py` 的重复实现全部迁过来, `publish` / `pr` / `actions` / `auth` 共用一套
+- 新增 `actions.py`: 拼 `gh run list|view|watch|rerun|cancel|download` 与 `gh workflow list|run` 参数;
+  `list` / `view` / `workflows` 取 `--json` 后用 Rich 表格渲染 (状态与结论译成中文, 耗时按 ISO 时间对算出 `1m23s`);
+  `--log` / `--log-failed` / `watch` / `dispatch` 等交互与流式输出原样透传给 `gh`
+- 新增 `auth.py`: `gh auth status` 取 `--json hosts` 渲染成状态表 (没登录时给中文提示, 而非 gh 的英文原文);
+  `login` / `logout` / `switch` / `refresh` / `setup-git` 原样透传; `token --save` 把令牌写进 `~/.config/gitx/config.toml`
+- `cli.py`: 新增 `actions` 命令组 (list / view / watch / rerun / cancel / download / workflows / dispatch) 与
+  `auth` 命令组 (status / login / logout / switch / refresh / token / setup-git), 面板「工作流 (Actions 运行)」与「账号 (登录态)」
+- `dispatch.py`: `actions` / `auth` 加入自有子命令表 (git 无同名命令, 不影响透传)
+- 下载侧一行未动: `gitx release` 仍是 API + 加速的只读路径 (不需要 gh)
 
 ## 📦 安装/升级
 
 ```bash
 # 方式 1: wheel (uv tool, 带自更新 gitx upgrade)
-uv tool install gitx-X.Y.Z-py3-none-any.whl
+uv tool install gitx-1.0.6rc1-py3-none-any.whl
 
 # 方式 2: 源码
 uv tool install .        # 或: uv tool install git@github.com:FLT18355/gitx.git
 
 # 验证
-gitx --version           # 应输出 gitx X.Y.Z (预发布是 X.Y.ZrcN)
-gitx doctor              # 环境自检
+gitx --version           # 应输出 gitx 1.0.6-pre1
+gitx actions -n 5        # 看最近的 Actions 运行 (需要已安装并登录的 gh)
+gitx auth                # 看登录了哪些账号
 ```
 
 ## 🔗 相关
 
-- 源码: https://github.com/FLT18355/gitx/tree/vX.Y.Z
-- 完整变更: `git log <上个标签>..vX.Y.Z --oneline`
+- 源码: https://github.com/FLT18355/gitx/tree/v1.0.6-pre1
+- 完整变更: `git log v1.0.5..v1.0.6-pre1 --oneline`
 
 ---
 
-*发布于: YYYY-MM-DD*
+*发布于: 2026-10-15*
 
 <!-- ================================================================
      以下是发布流程规范 (不随发布说明一起贴出), 每次发版必须遵守。

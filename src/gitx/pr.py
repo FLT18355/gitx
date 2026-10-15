@@ -6,10 +6,9 @@
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 
-from . import console, gitcmd, github
+from . import console, ghcli, gitcmd, github
 
 STATES = ("open", "closed", "all")
 
@@ -84,10 +83,8 @@ def create(title: str = "", body: str = "", *, base: str = "", head: str = "",
            fill: bool = False, draft: bool = False, path: str = ".") -> None:
     """用已登录的 gh 创建 Pull Request."""
     gitcmd.require_repo(path)
-    if not shutil.which("gh"):
-        console.error("创建 PR 需要已安装并登录 gh (https://cli.github.com)\n"
-                      "提示: gh auth login 之后重试; 也可以直接 gitx web pulls 去网页创建")
-    args = ["gh", "pr", "create"]
+    gh = ghcli.require("创建 PR", hint="也可以直接 gitx web pulls 去网页创建")
+    args = ["pr", "create"]
     if title:
         args += ["--title", title]
     if body:
@@ -101,7 +98,7 @@ def create(title: str = "", body: str = "", *, base: str = "", head: str = "",
     if draft:
         args.append("--draft")
     console.step("创建 Pull Request...")
-    if subprocess.run(args, cwd=path).returncode != 0:
+    if subprocess.run([gh, *args], cwd=path).returncode != 0:
         console.error("创建 PR 失败\n提示: 确认分支已推送 (gitx push), 或改用 gitx web pulls 在网页创建")
 
 

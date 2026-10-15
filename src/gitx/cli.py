@@ -6,6 +6,8 @@
   分支 (branch / switch / merge / rebase)  暂存 (stash)  标签 (tag)
   探索 (search / stat / web / ignore)      加速 (proxy ...)  配置 (config ... / doctor)
   发行版管理 (publish: 创建 / 上传附件 / 编辑 / 删除, 交给已登录的 gh)
+  工作流 (actions: 运行列表 / 详情 / 日志 / 重跑 / 产物下载, 交给 gh)
+  账号 (auth: 登录 / 退出 / 切换 / 权限 / 令牌, 交给 gh)
 非 gitx 自己的词一律透传 git (gitx status / gitx log --oneline), 这条快速通道
 由 dispatch.py 在导入 typer 之前处理, 因此几乎瞬时完成。
 """
@@ -20,8 +22,8 @@ from typing import Annotated
 import typer
 from rich.markup import escape
 
-from . import (__version__, accel, branch, cache, config, console, download, gitcmd, github, hub,
-               pr, publish, release, remote, repo, stash, submodule, sync, tag, upgrade)
+from . import (__version__, accel, actions, auth, branch, cache, config, console, download, gitcmd,
+               github, hub, pr, publish, release, remote, repo, stash, submodule, sync, tag, upgrade)
 
 PANEL_DL = "下载 (默认加速)"
 PANEL_PUB = "发行版管理 (创建 / 上传 / 编辑)"
@@ -31,6 +33,8 @@ PANEL_BRANCH = "分支 (切换 / 合并 / 变基)"
 PANEL_WIP = "暂存与标签"
 PANEL_HUB = "探索 (搜索 / 网页 / 模板)"
 PANEL_COLLAB = "协作 (PR / 子模组)"
+PANEL_ACT = "工作流 (Actions 运行)"
+PANEL_AUTH = "账号 (登录态)"
 PANEL_PROXY = "加速管理"
 PANEL_CONF = "配置与自检"
 
@@ -49,6 +53,11 @@ _EPILOG = """[key]示例[/key]
   gitx release cli/cli --list                       看最新发布的附件清单
   gitx release cli/cli --asset '*linux_amd64*'      只下匹配的附件
   gitx publish create v1.0.5 dist/* -p -F 说明.md    创建发行版并上传附件 (交给 gh)
+  gitx actions                                      看最近的 Actions 运行 (可按分支 / 状态过滤)
+  gitx actions view --log-failed                     只看失败步骤的日志
+  gitx actions download -D 产物目录                   下载运行产物 (附件)
+  gitx auth                                         看登录了哪些账号 (当前账号标出来)
+  gitx auth token --save                            复用 gh 的令牌, 把 API 限额提到 5000 次/小时
   gitx search "cli 工具" --language go -d           搜仓库并下载第 1 个
   gitx stat cli/cli                                 看仓库概览 (★ star / topics / 语言 / 贡献者)
   gitx graph -n 30                                  带图形的提交历史
@@ -104,6 +113,8 @@ _WELCOME_TIPS: tuple[tuple[str, str], ...] = (
     ("gitx proxy auto", "实测测速, 自动选用最快的加速源"),
     ("gitx remote", "查看/添加远程 (拉取加速, 推送直连)"),
     ("gitx pr / gitx submodule", "PR 列表与详情 / 子模组一条龙 (走加速)"),
+    ("gitx actions", "Actions 运行: 列表 / 日志 / 重跑 / 产物下载 (交给 gh)"),
+    ("gitx auth", "登录状态 / 切换账号 / 取令牌 (--save 提升 API 限额)"),
     ("gitx upgrade", "自更新到最新版本 (下载走加速)"),
     ("gitx -h", "查看全部命令与选项"),
 )
@@ -957,6 +968,151 @@ def pr_create(
 app.add_typer(pr_app, name="pr", rich_help_panel=PANEL_COLLAB)
 
 
+# ================================================================ 工作流 (Actions)
+
+actions_app = typer.Typer(help="工作流 (Actions): 运行列表 / 日志 / 重跑 / 产物下载 (交给已登录的 gh)",
+                          rich_markup_mode="rich", invoke_without_command=True,
+                          context_settings={"help_option_names": ["-h", "--help"]})
+
+_RUN_HELP = "运行号; 留空 = 由 gh 弹出选择器让人挑 (需要终端)"
+_ACT_REPO_HELP = "目标仓库 (owner/repo 或链接), 默认当前仓库"
+_STATUS_HELP = "gh 的状态名: queued / in_progress / success / failure / cancelled / timed_out ..."
+
+
+@actions_app.callback()
+def _actions_root(
+    ctx: typer.Context,
+    limit: Annotated[int, typer.Option("--limit", "-n", help="列表条数 (gh 默认 20)")] = 20,
+    workflow: Annotated[str, typer.Option("--workflow", "-w", help="只看某个工作流 (文件名或名称)")] = "",
+    branch: Annotated[str, typer.Option("--branch", "-b", help="只看某个分支")] = "",
+    status: Annotated[str, typer.Option("--status", "-s", help=_STATUS_HELP)] = "",
+    event: Annotated[str, typer.Option("--event", "-e",
+                                       help="按触发事件过滤: push / pull_request / workflow_dispatch ...")] = "",
+    user: Annotated[str, typer.Option("--user", "-u", help="按触发人过滤")] = "",
+    repo: Annotated[str, typer.Option("--repo", "-R", help=_ACT_REPO_HELP)] = "",
+) -> None:
+    # 不带子命令 = 列出最近的运行
+    if ctx.invoked_subcommand is None:
+        actions.list_runs(repo, workflow=workflow, branch=branch, status=status,
+                          event=event, user=user, limit=limit)
+
+
+@actions_app.command("list")
+def actions_list(
+    limit: Annotated[int, typer.Option("--limit", "-n", help="列表条数 (gh 默认 20)")] = 20,
+    workflow: Annotated[str, typer.Option("--workflow", "-w", help="只看某个工作流 (文件名或名称)")] = "",
+    branch: Annotated[str, typer.Option("--branch", "-b", help="只看某个分支")] = "",
+    status: Annotated[str, typer.Option("--status", "-s", help=_STATUS_HELP)] = "",
+    event: Annotated[str, typer.Option("--event", "-e", help="按触发事件过滤")] = "",
+    user: Annotated[str, typer.Option("--user", "-u", help="按触发人过滤")] = "",
+    all_workflows: Annotated[bool, typer.Option("--all", "-a", help="连已停用的工作流一起算")] = False,
+    repo: Annotated[str, typer.Option("--repo", "-R", help=_ACT_REPO_HELP)] = "",
+) -> None:
+    """列出运行: 运行号 / 状态 / 工作流 / 标题 / 分支 / 触发时间."""
+    actions.list_runs(repo, workflow=workflow, branch=branch, status=status, event=event,
+                      user=user, limit=limit, all_workflows=all_workflows)
+
+
+@actions_app.command("view")
+def actions_view(
+    run: Annotated[str, typer.Argument(metavar="[运行号]", help=_RUN_HELP)] = "",
+    job: Annotated[str, typer.Option("--job", "-j", help="只看某个作业 (作业编号或名字)")] = "",
+    attempt: Annotated[int, typer.Option("--attempt", "-a", help="看第几次尝试 (默认最后一次)")] = 0,
+    log: Annotated[bool, typer.Option("--log", help="打印完整日志 (交给 gh)")] = False,
+    log_failed: Annotated[bool, typer.Option("--log-failed", help="只打印失败步骤的日志")] = False,
+    verbose: Annotated[bool, typer.Option("--verbose", "-v", help="连每个步骤一起列出来")] = False,
+    web: Annotated[bool, typer.Option("--web", "-w", help="在浏览器中打开这次运行")] = False,
+    exit_status: Annotated[bool, typer.Option("--exit-status",
+                                              help="运行没成功则以非 0 退出 (脚本里判断用)")] = False,
+    repo: Annotated[str, typer.Option("--repo", "-R", help=_ACT_REPO_HELP)] = "",
+) -> None:
+    """看运行详情: 标题 / 分支 / 耗时 + 作业表 (--verbose 连步骤).
+
+    例: [key]gitx actions view --log-failed[/key] 直接看失败的步骤,
+    [key]gitx actions view 1234 --job 测试 --log[/key] 只看某个作业的日志。
+    """
+    actions.view(run, repo, job=job, attempt=attempt, log=log, log_failed=log_failed,
+                 verbose=verbose, web=web, exit_status=exit_status)
+
+
+@actions_app.command("watch")
+def actions_watch(
+    run: Annotated[str, typer.Argument(metavar="[运行号]", help=_RUN_HELP)] = "",
+    interval: Annotated[int, typer.Option("--interval", "-i", help="刷新间隔秒数 (gh 默认 3)")] = 0,
+    compact: Annotated[bool, typer.Option("--compact", help="只显示相关 / 失败的步骤")] = False,
+    exit_status: Annotated[bool, typer.Option("--exit-status", help="跑失败则以非 0 退出")] = False,
+    repo: Annotated[str, typer.Option("--repo", "-R", help=_ACT_REPO_HELP)] = "",
+) -> None:
+    """实时盯一个运行到结束 (会阻塞到跑完)."""
+    actions.watch(run, repo, interval=interval, compact=compact, exit_status=exit_status)
+
+
+@actions_app.command("rerun")
+def actions_rerun(
+    run: Annotated[str, typer.Argument(metavar="[运行号]", help=_RUN_HELP)] = "",
+    failed: Annotated[bool, typer.Option("--failed", help="只重跑失败的作业 (含它们的依赖)")] = False,
+    job: Annotated[str, typer.Option("--job", "-j", help="只重跑这个作业")] = "",
+    debug: Annotated[bool, typer.Option("--debug", help="带调试日志重跑")] = False,
+    repo: Annotated[str, typer.Option("--repo", "-R", help=_ACT_REPO_HELP)] = "",
+) -> None:
+    """重跑运行 ([key]--failed[/key] 只重跑失败的作业)."""
+    actions.rerun(run, repo, failed=failed, job=job, debug=debug)
+
+
+@actions_app.command("cancel")
+def actions_cancel(
+    run: Annotated[str, typer.Argument(metavar="[运行号]", help=_RUN_HELP)] = "",
+    force: Annotated[bool, typer.Option("--force", help="强制取消 (用于卡住不动的运行)")] = False,
+    repo: Annotated[str, typer.Option("--repo", "-R", help=_ACT_REPO_HELP)] = "",
+) -> None:
+    """取消运行."""
+    actions.cancel(run, repo, force=force)
+
+
+@actions_app.command("download")
+def actions_download(
+    run: Annotated[str, typer.Argument(metavar="[运行号]", help=_RUN_HELP)] = "",
+    dest: Annotated[str, typer.Option("--dir", "-D", help="下载到哪个目录")] = ".",
+    name: Annotated[list[str] | None, typer.Option("--name", "-N", help="只下这些产物 (可重复)")] = None,
+    pattern: Annotated[list[str] | None, typer.Option("--pattern", "-p", help="按通配匹配产物 (可重复)")] = None,
+    repo: Annotated[str, typer.Option("--repo", "-R", help=_ACT_REPO_HELP)] = "",
+) -> None:
+    """下载运行产物 (每个产物一个子目录)."""
+    actions.download(run, repo, dest=dest, names=list(name or []), patterns=list(pattern or []))
+
+
+@actions_app.command("workflows")
+def actions_workflows(
+    limit: Annotated[int, typer.Option("--limit", "-n", help="最多列出多少个 (gh 默认 50)")] = 50,
+    all_workflows: Annotated[bool, typer.Option("--all", "-a", help="连已停用的也列出来")] = False,
+    repo: Annotated[str, typer.Option("--repo", "-R", help=_ACT_REPO_HELP)] = "",
+) -> None:
+    """列出工作流: 名称 / 状态 / 路径 / 编号."""
+    actions.workflows(repo, limit=limit, all_workflows=all_workflows)
+
+
+@actions_app.command("dispatch")
+def actions_dispatch(
+    workflow: Annotated[str, typer.Argument(metavar="工作流", help="工作流文件名 (如 build.yml) 或名称")],
+    ref: Annotated[str, typer.Option("--ref", "-r", help="在哪个分支 / 标签上跑, 默认默认分支")] = "",
+    field: Annotated[list[str] | None, typer.Option("--field", "-F",
+                                                    help="参数 键=值, 值支持 @文件 读文件内容 (可重复)")] = None,
+    raw_field: Annotated[list[str] | None, typer.Option("--raw-field", "-f",
+                                                        help="参数 键=值, 原样当字符串传 (可重复)")] = None,
+    json_input: Annotated[bool, typer.Option("--json", help="从标准输入读整份 JSON 参数")] = False,
+    repo: Annotated[str, typer.Option("--repo", "-R", help=_ACT_REPO_HELP)] = "",
+) -> None:
+    """手动触发工作流 (工作流里要有 [key]workflow_dispatch[/key] 事件).
+
+    例: [key]gitx actions dispatch build.yml -F version=1.0.6[/key]
+    """
+    actions.dispatch(workflow, repo, ref=ref, fields=list(field or []),
+                     raw_fields=list(raw_field or []), json_input=json_input)
+
+
+app.add_typer(actions_app, name="actions", rich_help_panel=PANEL_ACT)
+
+
 # ================================================================ 发行版管理 (创建 / 上传 / 编辑 / 删除)
 
 publish_app = typer.Typer(help="发行版管理: 创建 / 上传附件 / 编辑 / 删除 (交给已登录的 gh)",
@@ -1221,6 +1377,115 @@ def proxy_uninstall(
 ) -> None:
     """移除 insteadOf 规则."""
     _proxy_uninstall(local)
+
+
+# ================================================================ 账号 (gh 登录态)
+
+auth_app = typer.Typer(help="账号: 登录 / 退出 / 切换 / 权限 / 令牌 (交给已安装的 gh)",
+                       rich_markup_mode="rich", invoke_without_command=True,
+                       context_settings={"help_option_names": ["-h", "--help"]})
+
+_HOST_HELP = "GitHub 主机名 (只有 GitHub Enterprise 才需要)"
+
+
+@auth_app.callback()
+def _auth_root(
+    ctx: typer.Context,
+    hostname: Annotated[str, typer.Option("--hostname", help=_HOST_HELP)] = "",
+    active: Annotated[bool, typer.Option("--active", help="只看当前账号")] = False,
+    show_token: Annotated[bool, typer.Option("--show-token", help="连令牌一起显示 (交给 gh 打印)")] = False,
+) -> None:
+    # 不带子命令 = 看登录状态
+    if ctx.invoked_subcommand is None:
+        auth.status(hostname=hostname, active_only=active, show_token=show_token)
+
+
+@auth_app.command("status")
+def auth_status(
+    hostname: Annotated[str, typer.Option("--hostname", help=_HOST_HELP)] = "",
+    active: Annotated[bool, typer.Option("--active", help="只看当前账号")] = False,
+    show_token: Annotated[bool, typer.Option("--show-token", help="连令牌一起显示 (交给 gh 打印)")] = False,
+) -> None:
+    """看登录状态: 主机 / 账号 / 状态 / git 协议."""
+    auth.status(hostname=hostname, active_only=active, show_token=show_token)
+
+
+@auth_app.command("login")
+def auth_login(
+    hostname: Annotated[str, typer.Option("--hostname", help=_HOST_HELP)] = "",
+    git_protocol: Annotated[str, typer.Option("--git-protocol", "-p", help="git 协议: ssh / https")] = "",
+    web: Annotated[bool, typer.Option("--web", "-w", help="用浏览器登录")] = False,
+    with_token: Annotated[bool, typer.Option("--with-token", help="从标准输入读令牌 (不进命令行历史)")] = False,
+    scopes: Annotated[list[str] | None, typer.Option("--scopes", "-s", help="额外申请的权限 (可重复)")] = None,
+    clipboard: Annotated[bool, typer.Option("--clipboard", help="把设备码复制到剪贴板")] = False,
+    skip_ssh_key: Annotated[bool, typer.Option("--skip-ssh-key", help="不生成 / 上传 SSH 密钥")] = False,
+    insecure_storage: Annotated[bool, typer.Option("--insecure-storage", help="令牌明文存盘 (不用凭据管理器)")] = False,
+) -> None:
+    """登录 GitHub (不加选项时由 gh 交互询问登录方式).
+
+    例: [key]echo <令牌> | gitx auth login --with-token[/key] 或 [key]gitx auth login --web[/key]
+    """
+    auth.login(hostname=hostname, git_protocol=git_protocol, web=web, with_token=with_token,
+               scopes=list(scopes or []), clipboard=clipboard, skip_ssh_key=skip_ssh_key,
+               insecure_storage=insecure_storage)
+
+
+@auth_app.command("logout")
+def auth_logout(
+    user: Annotated[str, typer.Argument(metavar="[账号]", help="要退出的账号; 留空由 gh 选择")] = "",
+    hostname: Annotated[str, typer.Option("--hostname", help=_HOST_HELP)] = "",
+) -> None:
+    """退出登录."""
+    auth.logout(user, hostname=hostname)
+
+
+@auth_app.command("switch")
+def auth_switch(
+    user: Annotated[str, typer.Argument(metavar="[账号]", help="切到哪个账号; 留空由 gh 列出来挑")] = "",
+    hostname: Annotated[str, typer.Option("--hostname", help=_HOST_HELP)] = "",
+) -> None:
+    """切换当前账号 (登录了多个账号时用)."""
+    auth.switch(user, hostname=hostname)
+
+
+@auth_app.command("refresh")
+def auth_refresh(
+    hostname: Annotated[str, typer.Option("--hostname", help=_HOST_HELP)] = "",
+    scopes: Annotated[list[str] | None, typer.Option("--scopes", "-s", help="要补的权限 (可重复)")] = None,
+    remove_scopes: Annotated[list[str] | None, typer.Option("--remove-scopes", help="要收回的权限 (可重复)")] = None,
+    reset_scopes: Annotated[bool, typer.Option("--reset-scopes", help="重置为最小权限集")] = False,
+    clipboard: Annotated[bool, typer.Option("--clipboard", help="把设备码复制到剪贴板")] = False,
+    insecure_storage: Annotated[bool, typer.Option("--insecure-storage", help="令牌明文存盘")] = False,
+) -> None:
+    """调整授权范围: [key]gitx auth refresh -s workflow[/key] 补权限."""
+    auth.refresh(hostname=hostname, scopes=list(scopes or []),
+                 remove_scopes=list(remove_scopes or []), reset_scopes=reset_scopes,
+                 clipboard=clipboard, insecure_storage=insecure_storage)
+
+
+@auth_app.command("token")
+def auth_token(
+    hostname: Annotated[str, typer.Option("--hostname", help=_HOST_HELP)] = "",
+    user: Annotated[str, typer.Option("--user", "-u", help="取哪个账号的令牌")] = "",
+    save: Annotated[bool, typer.Option("--save", help="顺手写进 gitx 配置 (token 项)")] = False,
+) -> None:
+    """打印当前账号的令牌 ([key]--save[/key] 写进 gitx 配置提升 API 限额).
+
+    只打印时原样输出 gh 的结果, 方便 [key]gitx auth token > token.txt[/key] 这样接管道。
+    """
+    auth.token(hostname=hostname, user=user, save=save)
+
+
+@auth_app.command("setup-git")
+def auth_setup_git(
+    hostname: Annotated[str, typer.Option("--hostname", help=_HOST_HELP)] = "",
+    force: Annotated[bool, typer.Option("--force", "-f", help="主机不认识时也强行配置")] = False,
+) -> None:
+    """让 git 的 https 推送 / 拉取走 gh 的凭据."""
+    auth.setup_git(hostname=hostname, force=force)
+
+
+app.add_typer(auth_app, name="auth", rich_help_panel=PANEL_AUTH)
 
 
 app.add_typer(proxy_app, name="proxy", rich_help_panel=PANEL_PROXY)

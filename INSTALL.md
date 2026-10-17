@@ -3,8 +3,8 @@
 ## 前置条件
 
 - **git**（必需，仓库/同步功能的基础）
-- **gh**（可选，只有 `gitx publish` / `gitx actions` / `gitx auth` / `gitx pr create` 需要；
-  从 https://cli.github.com 安装并 `gh auth login` 后即可用于发行版管理、Actions 与账号管理）
+- **gh**（可选，只有 `gitx publish` / `gitx actions` / `gitx auth` / `gitx repos` / `gitx pr create` 需要；
+  从 https://cli.github.com 安装并 `gh auth login` 后即可用于发行版管理、Actions、账号管理与仓库管理）
 - **Python 3.14+**（`uv` 会自动下载对应的 CPython，无需系统预装）
 - **uv**（安装器，未装时先执行下面命令）：
 

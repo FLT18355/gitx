@@ -2,7 +2,7 @@
 
 gitx 不自己实现 GitHub 的写操作与账号管理, 一律交给已安装并登录的 `gh`
 (https://cli.github.com): 本工具只拼参数、不接触令牌, 权限由 gh 自己的登录态决定。
-发行版 (publish) / 工作流 (actions) / 登录态 (auth) / 创建 PR 都走这一层。
+发行版 (publish) / 工作流 (actions) / 登录态 (auth) / 我的仓库 (repos) / 创建 PR 都走这一层。
 """
 
 from __future__ import annotations

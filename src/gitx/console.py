@@ -203,20 +203,24 @@ PICKER_STYLE = (
 MAX_VISIBLE = 5  # 交互列表最多同时渲染几行, 超出的部分靠上下键滚动
 
 
-def _picker(multi: bool, message: str, labels: Sequence[str], instruction: str) -> Any:
+def _picker(multi: bool, message: str, labels: Sequence[str], instruction: str,
+            checked: Sequence[bool] | None = None) -> Any:
     """建一个 questionary 选择器 (列表窗口压到 MAX_VISIBLE 行, 打字即筛选).
 
     questionary 会连带拉进 prompt_toolkit (导入约 2 秒), 所以只在这里延迟加载,
-    普通命令不必付这份启动开销.
+    普通命令不必付这份启动开销. checked 给多选用, 决定各项初始是否已勾选.
     """
     import questionary
     from prompt_toolkit.layout.dimension import LayoutDimension
     from questionary.prompts.common import InquirerControl
 
     build = questionary.checkbox if multi else questionary.select
+    flags = list(checked or [])
     question = build(
         message,
-        choices=[questionary.Choice(title=label, value=i) for i, label in enumerate(labels)],
+        choices=[questionary.Choice(title=label, value=i,
+                                    checked=bool(flags[i]) if i < len(flags) else False)
+                 for i, label in enumerate(labels)],
         instruction=instruction or None,
         style=questionary.Style(PICKER_STYLE),
         use_search_filter=True,
@@ -234,10 +238,22 @@ def select(message: str, labels: Sequence[str], *, instruction: str = "") -> int
     return _picker(False, message, labels, instruction)
 
 
-def check(message: str, labels: Sequence[str], *, instruction: str = "") -> list[int] | None:
-    """上下键多选 (空格勾选), 直接打字即筛选; 返回下标 (升序), 中断返回 None."""
-    picked = _picker(True, message, labels, instruction)
+def check(message: str, labels: Sequence[str], *, instruction: str = "",
+          checked: Sequence[bool] | None = None) -> list[int] | None:
+    """上下键多选 (空格勾选), 直接打字即筛选; checked 决定初始勾选; 返回下标 (升序), 中断返回 None."""
+    picked = _picker(True, message, labels, instruction, checked)
     return None if picked is None else sorted(picked)
+
+
+def text(message: str, *, default: str = "", instruction: str = "") -> str | None:
+    """单行输入 (questionary, 与选择器同一套配色); 中断返回 None.
+
+    default 表现为光标前已填好的文本 (回车即采用), 因此"改哪一项就用当前值当默认"。
+    """
+    import questionary
+
+    return questionary.text(message, default=default, instruction=instruction or None,
+                            style=questionary.Style(PICKER_STYLE)).ask()
 
 
 def progress() -> Progress:

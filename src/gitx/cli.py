@@ -8,6 +8,7 @@
   发行版管理 (publish: 创建 / 上传附件 / 编辑 / 删除, 交给已登录的 gh)
   工作流 (actions: 运行列表 / 详情 / 日志 / 重跑 / 产物下载, 交给 gh)
   账号 (auth: 登录 / 退出 / 切换 / 权限 / 令牌, 交给 gh)
+  我的仓库 (repos: 挑一个仓库 -> 进编辑界面改设置 / 克隆 / 归档 / 删除, 交给 gh)
 非 gitx 自己的词一律透传 git (gitx status / gitx log --oneline), 这条快速通道
 由 dispatch.py 在导入 typer 之前处理, 因此几乎瞬时完成。
 """
@@ -22,8 +23,9 @@ from typing import Annotated
 import typer
 from rich.markup import escape
 
-from . import (__version__, accel, actions, auth, branch, cache, config, console, download, gitcmd,
-               github, hub, pr, publish, release, remote, repo, stash, submodule, sync, tag, upgrade)
+from . import (__version__, accel, actions, auth, branch, cache, config, console, download, ghrepo,
+               gitcmd, github, hub, pr, publish, release, remote, repo, stash, submodule, sync, tag,
+               upgrade)
 
 PANEL_DL = "下载 (默认加速)"
 PANEL_PUB = "发行版管理 (创建 / 上传 / 编辑)"
@@ -34,6 +36,7 @@ PANEL_WIP = "暂存与标签"
 PANEL_HUB = "探索 (搜索 / 网页 / 模板)"
 PANEL_COLLAB = "协作 (PR / 子模组)"
 PANEL_ACT = "工作流 (Actions 运行)"
+PANEL_GHR = "我的仓库 (挑一个 -> 编辑)"
 PANEL_AUTH = "账号 (登录态)"
 PANEL_PROXY = "加速管理"
 PANEL_CONF = "配置与自检"
@@ -58,6 +61,8 @@ _EPILOG = """[key]示例[/key]
   gitx actions download -D 产物目录                   下载运行产物 (附件)
   gitx auth                                         看登录了哪些账号 (当前账号标出来)
   gitx auth token --save                            复用 gh 的令牌, 把 API 限额提到 5000 次/小时
+  gitx repos                                       上下键挑我的仓库 -> 进编辑界面 (改描述 / 话题 / 可见性)
+  gitx repos -n 5                                  只取最近 5 个仓库来挑 (超出的不上屏)
   gitx search "cli 工具" --language go -d           搜仓库并下载第 1 个
   gitx stat cli/cli                                 看仓库概览 (★ star / topics / 语言 / 贡献者)
   gitx graph -n 30                                  带图形的提交历史
@@ -115,6 +120,7 @@ _WELCOME_TIPS: tuple[tuple[str, str], ...] = (
     ("gitx pr / gitx submodule", "PR 列表与详情 / 子模组一条龙 (走加速)"),
     ("gitx actions", "Actions 运行: 列表 / 日志 / 重跑 / 产物下载 (交给 gh)"),
     ("gitx auth", "登录状态 / 切换账号 / 取令牌 (--save 提升 API 限额)"),
+    ("gitx repos", "挑一个我的仓库 -> 进编辑界面改设置 (描述 / 话题 / 可见性 ...)"),
     ("gitx upgrade", "自更新到最新版本 (下载走加速)"),
     ("gitx -h", "查看全部命令与选项"),
 )
@@ -1231,6 +1237,248 @@ def publish_delete(
 
 
 app.add_typer(publish_app, name="publish", rich_help_panel=PANEL_PUB)
+
+
+# ================================================================ 我的仓库 (挑一个 -> 编辑界面)
+
+repos_app = typer.Typer(help="我的仓库: 挑一个 -> 编辑设置 / 克隆 / 复刻 / 归档 / 删除 (交给已登录的 gh)",
+                        rich_markup_mode="rich", invoke_without_command=True,
+                        context_settings={"help_option_names": ["-h", "--help"]})
+
+_REPO_ARG = "仓库 (owner/repo 或链接); 留空则上下键挑一个"
+# 挑选器参数: callback 填一次, 子命令共用 (所以 `gitx repos -n 5 view` 的挑选器只看前 5 个)
+_PICK: dict[str, object] = {}
+
+
+@repos_app.callback()
+def _repos_root(
+    ctx: typer.Context,
+    limit: Annotated[int, typer.Option(
+        "--limit", "-n", help="一次取几个仓库来挑 (默认 30; 只想看前几个就给个小数字)")] = 30,
+    owner: Annotated[str, typer.Option("--owner", "-o", help="看谁的仓库 (默认当前登录账号)")] = "",
+    visibility: Annotated[str, typer.Option("--visibility",
+                                            help="按可见性过滤: public / private / internal")] = "",
+    language: Annotated[str, typer.Option("--language", "-l", help="按主要语言过滤")] = "",
+    topic: Annotated[str, typer.Option("--topic", "-t", help="按话题过滤")] = "",
+    source: Annotated[bool, typer.Option("--source", help="只看原创 (非复刻) 仓库")] = False,
+    forks: Annotated[bool, typer.Option("--fork", help="只看复刻仓库")] = False,
+    archived: Annotated[bool, typer.Option("--archived", help="只看已归档仓库")] = False,
+    no_archived: Annotated[bool, typer.Option("--no-archived", help="排除已归档仓库")] = False,
+) -> None:
+    # 不带子命令 = 上下键挑仓库 -> 进仓库编辑界面
+    _PICK.update(owner=owner, limit=limit, visibility=visibility, language=language, topic=topic,
+                 source=source, forks=forks, archived=archived, no_archived=no_archived)
+    if ctx.invoked_subcommand is None:
+        ghrepo.shell(owner=owner, limit=limit, visibility=visibility, language=language,
+                     topic=topic, source=source, forks=forks, archived=archived,
+                     no_archived=no_archived)
+
+
+def _pick_target(target: str, what: str) -> str:
+    """子命令的仓库参数: 留空就用仓库挑选器 (过滤选项同 `gitx repos`)."""
+    return ghrepo.resolve(target, what=what, **_PICK)
+
+
+@repos_app.command("list")
+def repos_list(
+    limit: Annotated[int, typer.Option("--limit", "-n", help="列几个 (默认 30)")] = 30,
+    owner: Annotated[str, typer.Option("--owner", "-o", help="看谁的仓库 (默认当前登录账号)")] = "",
+    visibility: Annotated[str, typer.Option("--visibility",
+                                            help="按可见性过滤: public / private / internal")] = "",
+    language: Annotated[str, typer.Option("--language", "-l", help="按主要语言过滤")] = "",
+    topic: Annotated[str, typer.Option("--topic", "-t", help="按话题过滤")] = "",
+    source: Annotated[bool, typer.Option("--source", help="只看原创 (非复刻) 仓库")] = False,
+    forks: Annotated[bool, typer.Option("--fork", help="只看复刻仓库")] = False,
+    archived: Annotated[bool, typer.Option("--archived", help="只看已归档仓库")] = False,
+    no_archived: Annotated[bool, typer.Option("--no-archived", help="排除已归档仓库")] = False,
+) -> None:
+    """列出仓库: 仓库 / 描述 / 可见性 / star / 语言 / 更新 / 标记."""
+    ghrepo.list_repos(owner, limit=limit, visibility=visibility, language=language, topic=topic,
+                      source=source, forks=forks, archived=archived, no_archived=no_archived)
+
+
+@repos_app.command("edit")
+def repos_edit(
+    target: Annotated[str, typer.Argument(metavar="[仓库]", help=_REPO_ARG)] = "",
+    description: Annotated[str | None, typer.Option("--description", "-d",
+                                                    help="新描述 (空串 = 清空)")] = None,
+    homepage: Annotated[str | None, typer.Option("--homepage", "-H",
+                                                 help="新主页地址 (空串 = 清空)")] = None,
+    add_topic: Annotated[list[str] | None, typer.Option("--topic", "-t", help="加话题 (可重复)")] = None,
+    remove_topic: Annotated[list[str] | None, typer.Option("--remove-topic",
+                                                           help="删话题 (可重复)")] = None,
+    visibility: Annotated[str, typer.Option("--visibility",
+                                            help="改成 public / private / internal (会确认)")] = "",
+    default_branch: Annotated[str, typer.Option("--default-branch", "-b", help="改默认分支")] = "",
+    template: Annotated[bool | None, typer.Option("--template/--no-template",
+                                                  help="模板仓库开关")] = None,
+    issues: Annotated[bool | None, typer.Option("--issues/--no-issues", help="议题开关")] = None,
+    wiki: Annotated[bool | None, typer.Option("--wiki/--no-wiki", help="Wiki 开关")] = None,
+    projects: Annotated[bool | None, typer.Option("--projects/--no-projects", help="项目开关")] = None,
+    discussions: Annotated[bool | None, typer.Option("--discussions/--no-discussions",
+                                                     help="讨论开关")] = None,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="跳过改可见性的确认")] = False,
+) -> None:
+    """改仓库设置(描述 / 主页 / 话题 / 可见性 / 默认分支 / 功能开关 / 模板).
+
+    什么选项都不给 = 进交互式编辑界面 (上下键选项, 回车确认):
+
+      gitx repos edit                挑一个仓库 -> 编辑界面
+      gitx repos edit owner/repo     直接进这个仓库的编辑界面
+
+    非交互则直接给选项, 例: [key]gitx repos edit owner/repo -d "新描述" -t cli --no-wiki[/key]
+    """
+    features: dict[str, bool] = {
+        field: value for field, value in (("hasIssuesEnabled", issues), ("hasWikiEnabled", wiki),
+                                          ("hasProjectsEnabled", projects),
+                                          ("hasDiscussionsEnabled", discussions))
+        if value is not None}
+    if not (description is not None or homepage is not None or add_topic or remove_topic
+            or visibility or default_branch or template is not None or features):
+        if not console.is_terminal():
+            console.error('没有要改的项\n提示: 直接给选项, 如 gitx repos edit owner/repo -d "新描述"')
+        ghrepo.shell(target, **_PICK)
+        return
+    nwo = _pick_target(target, "edit")
+    if visibility and visibility not in ("public", "private", "internal"):
+        console.error("可见性只能是 public / private / internal")
+    if visibility and not yes:
+        console.warn("改可见性有副作用: 会掉 star / 断掉复刻关系 / 关闭推送规则集")
+        if not console.ask(f"确认把 {nwo} 改成 {visibility}?", default=False):
+            console.warn("已取消")
+            return
+    ghrepo.edit(nwo, description=description, homepage=homepage, add_topics=tuple(add_topic or ()),
+                remove_topics=tuple(remove_topic or ()), visibility=visibility,
+                default_branch=default_branch, template=template, features=features or None)
+
+
+@repos_app.command("view")
+def repos_view(
+    target: Annotated[str, typer.Argument(metavar="[仓库]", help=_REPO_ARG)] = "",
+    web: Annotated[bool, typer.Option("--web", "-w", help="在浏览器打开仓库页面")] = False,
+) -> None:
+    """看仓库的当前设置: 描述 / 主页 / 话题 / 可见性 / 默认分支 / 功能."""
+    ghrepo.view(_pick_target(target, "view"), web=web)
+
+
+@repos_app.command("clone")
+def repos_clone(
+    target: Annotated[str, typer.Argument(metavar="[仓库]", help=_REPO_ARG)] = "",
+    dest: Annotated[str, typer.Option("--dir", "-D", help="放到哪个目录")] = "",
+    depth: Annotated[int, typer.Option("--depth", "-d", help="克隆深度, 0 = 完整克隆")] = 1,
+) -> None:
+    """克隆到本地 ([info]公开仓库和 gitx download 一样走加速[/info]; 私有仓库交给 gh, 它自带凭据)."""
+    ghrepo.clone(_pick_target(target, "clone"), dest, depth=depth)
+
+
+@repos_app.command("create")
+def repos_create(
+    name: Annotated[str, typer.Argument(metavar="名字", help="新仓库名; owner/名字 可指定归属")],
+    description: Annotated[str, typer.Option("--description", "-d", help="仓库描述")] = "",
+    homepage: Annotated[str, typer.Option("--homepage", "-H", help="主页地址")] = "",
+    visibility: Annotated[str, typer.Option("--visibility",
+                                            help="public / private / internal, 缺省交给 gh 询问")] = "",
+    readme: Annotated[bool, typer.Option("--readme", help="顺带初始化一个 README")] = False,
+    gitignore: Annotated[str, typer.Option("--gitignore", "-g", help=".gitignore 模板名 (如 Python)")] = "",
+    license_: Annotated[str, typer.Option("--license", help="开源许可证名 (如 mit)")] = "",
+    template: Annotated[str, typer.Option("--template", "-p", help="按模板仓库创建")] = "",
+    source: Annotated[str, typer.Option("--source", "-s", help="用本地目录当源 (连同远程一起配好)")] = "",
+    push: Annotated[bool, typer.Option("--push", help="把本地提交推上去")] = False,
+    clone_: Annotated[bool, typer.Option("--clone", "-c", help="顺手克隆到当前目录")] = False,
+    no_issues: Annotated[bool, typer.Option("--no-issues", help="不启用议题")] = False,
+    no_wiki: Annotated[bool, typer.Option("--no-wiki", help="不启用 Wiki")] = False,
+    team: Annotated[str, typer.Option("--team", help="给组织里的某个团队开权限")] = "",
+) -> None:
+    """新建仓库 (默认交给 gh 自己询问可见性等).
+
+    例: [key]gitx repos create my-tool --source . --push --public -d "一句话介绍"[/key]
+    """
+    ghrepo.create(name, visibility=visibility, description=description, homepage=homepage,
+                  readme=readme, gitignore=gitignore, license_=license_, template=template,
+                  source=source, push=push, clone_=clone_, disable_issues=no_issues,
+                  disable_wiki=no_wiki, team=team)
+
+
+@repos_app.command("fork")
+def repos_fork(
+    target: Annotated[str, typer.Argument(metavar="[仓库]", help=_REPO_ARG)] = "",
+    clone_: Annotated[bool, typer.Option("--clone", "-c", help="顺带克隆到本地")] = False,
+    remote: Annotated[bool, typer.Option("--remote", help="给本地仓库加一个远程")] = False,
+    org: Annotated[str, typer.Option("--org", help="复刻到某个组织下")] = "",
+    fork_name: Annotated[str, typer.Option("--fork-name", help="复刻后改名")] = "",
+    default_branch_only: Annotated[bool, typer.Option("--default-branch-only",
+                                                      help="只复刻默认分支")] = False,
+) -> None:
+    """把仓库复刻到自己账号下 (别人的仓库也能复刻: gitx repos fork cli/cli)."""
+    ghrepo.fork(_pick_target(target, "fork"), clone_=clone_, remote=remote, org=org,
+                fork_name=fork_name, default_branch_only=default_branch_only)
+
+
+@repos_app.command("rename")
+def repos_rename(
+    target: Annotated[str, typer.Argument(metavar="[仓库]", help=_REPO_ARG)] = "",
+    new_name: Annotated[str, typer.Argument(metavar="[新名字]", help="新仓库名 (不含 owner)")] = "",
+) -> None:
+    """改仓库名 (新名字留空就问一次; 本地远程地址需要自己 gitx remote set-url)."""
+    nwo = _pick_target(target, "rename")
+    if not new_name:
+        if not console.is_terminal():
+            console.error("请给出新名字: gitx repos rename owner/repo 新名字")
+        new_name = console.text("新仓库名 (不含 owner)", default=nwo.split("/")[-1]) or ""
+    ghrepo.rename(nwo, new_name)
+
+
+@repos_app.command("archive")
+def repos_archive(target: Annotated[str, typer.Argument(metavar="[仓库]", help=_REPO_ARG)] = "") -> None:
+    """归档仓库 (归档后变只读)."""
+    ghrepo.archive(_pick_target(target, "archive"))
+
+
+@repos_app.command("unarchive")
+def repos_unarchive(target: Annotated[str, typer.Argument(metavar="[仓库]", help=_REPO_ARG)] = "") -> None:
+    """取消归档."""
+    ghrepo.archive(_pick_target(target, "unarchive"), archived=False)
+
+
+@repos_app.command("sync")
+def repos_sync(
+    target: Annotated[str, typer.Argument(metavar="[仓库]", help=_REPO_ARG)] = "",
+    source: Annotated[str, typer.Option("--source", "-s", help="源仓库; 缺省 = 它的上游")] = "",
+    branch: Annotated[str, typer.Option("--branch", "-b", help="同步哪个分支 (缺省默认分支)")] = "",
+    force: Annotated[bool, typer.Option("--force", help="硬对齐 (丢弃目标分支上的提交)")] = False,
+) -> None:
+    """把仓库对齐到源仓库 (复刻与上游同步最常用)."""
+    ghrepo.sync(_pick_target(target, "sync"), source=source, branch=branch, force=force)
+
+
+@repos_app.command("star")
+def repos_star(target: Annotated[str, typer.Argument(metavar="[仓库]", help=_REPO_ARG)] = "") -> None:
+    """收藏仓库 (别人的也行: gitx repos star cli/cli)."""
+    ghrepo.star(_pick_target(target, "star"), on=True)
+
+
+@repos_app.command("unstar")
+def repos_unstar(target: Annotated[str, typer.Argument(metavar="[仓库]", help=_REPO_ARG)] = "") -> None:
+    """取消收藏."""
+    ghrepo.star(_pick_target(target, "unstar"), on=False)
+
+
+@repos_app.command("set-default")
+def repos_set_default(target: Annotated[str, typer.Argument(metavar="[仓库]", help=_REPO_ARG)] = "") -> None:
+    """把仓库设为当前目录的默认仓库 (之后 gh / gitx 少写 -R)."""
+    ghrepo.set_default(_pick_target(target, "set-default"))
+
+
+@repos_app.command("delete")
+def repos_delete(
+    target: Annotated[str, typer.Argument(metavar="[仓库]", help=_REPO_ARG)] = "",
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="跳过确认")] = False,
+) -> None:
+    """删除仓库 ([err]不可恢复[/err], 需要 gh 有 delete_repo 权限)."""
+    ghrepo.delete(_pick_target(target, "delete"), yes=yes)
+
+
+app.add_typer(repos_app, name="repos", rich_help_panel=PANEL_GHR)
 
 
 # ================================================================ 加速管理

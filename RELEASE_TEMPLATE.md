@@ -1,6 +1,20 @@
-# gitx v1.0.6-pre1 发布说明
+# gitx v1.0.6-pre2 发布说明
 
 ## 🎉 新增
+
+- **`gitx repos`: 我的仓库一条龙** —— 上下键挑一个仓库(最多同时渲染 5 行, 超出的随光标滚动, 打字即筛选) ->
+  进**仓库编辑界面**: 先摊开当前设置(描述 / 主页 / 话题 / 可见性 / 默认分支 / 功能开关 / 模板 / star),
+  再一项一项地改, 改完自动刷新, 选"完成"退出; 列表 / 克隆 / 新建 / 复刻 / 改名 / 归档 / 同步 / 收藏 /
+  设为默认 / 删除一应俱全, 全部交给已登录的 `gh`。
+
+  ```bash
+  gitx repos                     # 挑仓库 -> 编辑界面 (改描述 / 话题 / 可见性 ...)
+  gitx repos -n 5                # 只取最近 5 个仓库来挑 (只想看前几个就给个小数字)
+  gitx repos -n 5 delete         # 子命令也能省略仓库: 只在前 5 个里挑一个删
+  gitx repos edit owner/repo     # 跳过挑选, 直接进这个仓库的编辑界面
+  gitx repos edit owner/repo -d "新描述" -t cli --no-wiki   # 非交互: 直接给选项
+  gitx repos star cli/cli        # 收藏 (unstar 取消)
+  ```
 
 - **`gitx actions`: Actions 运行一条龙** —— 不再需要开网页看 CI: 运行列表 / 详情(作业表与耗时, `--verbose` 连步骤) /
   日志 / 实时盯 / 重跑 / 取消 / 产物下载 / 工作流列表 / 手动触发, 全部交给已登录的 `gh`。
@@ -55,15 +69,17 @@ uv tool install gitx-1.0.6rc1-py3-none-any.whl
 uv tool install .        # 或: uv tool install git@github.com:FLT18355/gitx.git
 
 # 验证
-gitx --version           # 应输出 gitx 1.0.6-pre1
+gitx --version           # 应输出 gitx 1.0.6-pre2
+gitx repos -n 5          # 挑一个我的仓库 -> 进编辑界面 (需要已安装并登录的 gh)
+gitx repos view cli/cli  # 看别人仓库的当前设置 (只读)
 gitx actions -n 5        # 看最近的 Actions 运行 (需要已安装并登录的 gh)
 gitx auth                # 看登录了哪些账号
 ```
 
 ## 🔗 相关
 
-- 源码: https://github.com/FLT18355/gitx/tree/v1.0.6-pre1
-- 完整变更: `git log v1.0.5..v1.0.6-pre1 --oneline`
+- 源码: https://github.com/FLT18355/gitx/tree/v1.0.6-pre2
+- 完整变更: `git log v1.0.6-pre1..v1.0.6-pre2 --oneline`
 
 ---
 

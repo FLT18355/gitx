@@ -2,6 +2,12 @@
 
 给中国人用的 GitHub 加速与同步工具 —— 下载 / 同步 / 加速, 一条命令搞定。
 
+> **v1.0.6-pre2: 我的仓库管理 (`gitx repos`)** ——
+> 新增 **`gitx repos`**: 自己的仓库一条龙 —— 上下键挑一个仓库(最多同时渲染 5 行, 超出的随光标滚动, 打字即筛选) ->
+> 进**仓库编辑界面**(先摊开当前设置: 描述 / 主页 / 话题 / 可见性 / 默认分支 / 功能开关 / 模板 / star, 再一项一项地改, 改完自动刷新);
+> 另有 `list` / `view` / `edit`(非交互也可直接给选项) / `clone`(走加速) / `create` / `fork` / `rename` / `archive` / `sync` / `star` / `set-default` / `delete`,
+> 全部交给已登录的 `gh`; `-n/--limit` 决定一次取几个仓库来挑("只看前几个"), `-o` 可看别人的仓库。
+>
 > **v1.0.6-pre1: Actions 运行与账号管理 (`gitx actions` / `gitx auth`)** ——
 > 新增 **`gitx actions`**: 工作流一条龙 —— 运行列表(按工作流 / 分支 / 状态 / 事件过滤)、详情(作业表 + `--verbose` 连步骤与耗时)、
 > 日志(`--log` / `--log-failed`)、`watch` 实时盯到结束、`rerun`(`--failed` 只重跑失败的作业)/ `cancel`、
@@ -237,6 +243,53 @@ gitx auth setup-git                       # 让 git 的 https 推送 / 拉取走
 
 登录 / 退出 / 切换 / 刷新都由 `gh` 自己做交互 (设备码、浏览器、SSH 密钥), gitx 原样透传它的输出;
 没登录时 `gitx auth` 给的是中文提示, 而不是 gh 的英文原文。
+
+### 我的仓库 (挑一个 -> 编辑界面, 交给已登录的 gh)
+
+`gitx repos` 是"自己的仓库"面板: 先用 ↑↓ 挑一个仓库(最多同时渲染 5 行, 超出的随光标滚动, 直接打字即筛选),
+回车就进**仓库编辑界面** —— 界面上先摊开这个仓库的当前设置(描述 / 主页 / 话题 / 可见性 / 默认分支 /
+功能开关 / 模板 / star), 再让你一项一项地改, 改完自动刷新一遍, 选"完成"退出。
+
+```bash
+gitx repos                     # 挑仓库 -> 编辑界面 (改描述 / 话题 / 可见性 / 默认分支 / 功能开关 ...)
+gitx repos -n 5                # 只取最近 5 个仓库来挑 (只想看前几个就给个小数字)
+gitx repos -o cli -n 20        # 看别人的仓库 (还能按 --visibility / -l 语言 / -t 话题 / --source 过滤)
+gitx repos edit owner/repo     # 跳过挑选, 直接进这个仓库的编辑界面
+gitx repos edit owner/repo -d "新描述" -t cli -t 工具 --no-wiki   # 非交互: 直接给选项
+gitx repos list                # 表格形式列出我的仓库: 仓库 / 描述 / 可见性 / ★ / 语言 / 更新 / 标记
+gitx repos view owner/repo     # 看当前设置 (--web 打开网页)
+gitx repos clone owner/repo    # 克隆到本地 (和 gitx download 一样走加速, 推送仍直连)
+gitx repos create my-tool --source . --push --public -d "一句话介绍"   # 新建 (交给 gh)
+gitx repos fork cli/cli --clone       # 复刻到自己的账号 (--org 到组织, --fork-name 改名)
+gitx repos rename owner/repo 新名字    # 改名 (新名字留空会问一次)
+gitx repos archive owner/repo         # 归档 (unarchive 取消归档)
+gitx repos sync owner/repo -s 上游/仓库  # 与上游 / 源仓库对齐 (--force 硬对齐)
+gitx repos star cli/cli               # 收藏 (unstar 取消收藏)
+gitx repos set-default owner/repo     # 设为当前目录的默认仓库 (之后少写 -R)
+gitx repos delete owner/repo -y       # 删除 (不可恢复, 需要 delete_repo 权限)
+```
+
+| 子命令 | 作用 | 常用选项 |
+| --- | --- | --- |
+| `repos` | 挑仓库 -> 进编辑界面 | `-n` 一次取几个仓库来挑, `-o` 谁的仓库, `--visibility` / `-l` / `-t` / `--source` / `--fork` / `--archived` / `--no-archived` 过滤 |
+| `repos list` | 仓库表格 | 同上 |
+| `repos edit` | 改设置 (不给选项 = 进编辑界面) | `-d` 描述, `-H` 主页, `-t` / `--remove-topic` 话题, `--visibility` (会确认), `-b` 默认分支, `--template`+`--no-template`, `--issues`+`--no-issues` / `--wiki` / `--projects` / `--discussions`, `-y` 跳过可见性确认 |
+| `repos view` | 看当前设置 | `--web` 打开网页 |
+| `repos clone` | 克隆 (公开走加速, 私有交给 gh) | `-D` 目录, `-d` 深度 (0 = 完整克隆) |
+| `repos create` | 新建仓库 | `-d` 描述, `-H` 主页, `--visibility`, `--readme`, `-g` gitignore 模板, `--license`, `-p` 模板仓库, `-s` 本地目录当源, `--push` / `-c` / `--no-issues` / `--no-wiki` / `--team` |
+| `repos fork` | 复刻 | `-c` 顺手克隆, `--remote`, `--org`, `--fork-name`, `--default-branch-only` |
+| `repos rename` | 改名 | 位置参数给新名字, 留空会问一次 |
+| `repos archive` / `repos unarchive` | 归档 / 取消归档 | |
+| `repos sync` | 与源仓库对齐 | `-s` 源仓库, `-b` 分支, `--force` |
+| `repos star` / `repos unstar` | 收藏 / 取消收藏 | |
+| `repos set-default` | 设为当前目录的默认仓库 | |
+| `repos delete` | 删除仓库 | `-y` 跳过确认 |
+
+编辑界面里的每一次修改都走 `gh repo edit`, 而且**只把变了的项组成参数**(描述改成原样不发请求,
+想清空就把那一项删干净再回车); 改可见性会先提示副作用(掉 star / 断掉复刻关系)并要求确认。
+所有子命令的仓库参数都能省略 —— 省略时先弹出同一个上下键挑选器, 所以 `gitx repos view` /
+`gitx repos star` / `gitx repos delete` 都能一路选下来; 挑选器的条数由 `gitx repos` 的 `-n` 决定
+(例: `gitx repos -n 5 delete` 只在前 5 个仓库里挑)。
 
 ### 探索 (新)
 
@@ -506,6 +559,7 @@ src/gitx/
   ghcli.py      gh CLI 共用层 (定位 / 登录态 / 调用 / JSON 解析), publish + pr + actions + auth 共用
   actions.py    Actions 运行与工作流 (list / view / watch / rerun / cancel / download / workflows / dispatch)
   auth.py       账号登录态 (status / login / logout / switch / refresh / token / setup-git)
+  ghrepo.py     我的仓库 (挑一个 -> 编辑界面; list / edit / view / clone / create / fork / rename / archive / sync / star / delete)
   upgrade.py    自更新 (加速下载 wheel 后 uv/pip 重装)
 ```
 

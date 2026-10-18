@@ -142,6 +142,7 @@ def create(tag: str, files: list[str] | None = None, *, target: str = "", title:
     console.step(f"创建发行版 {tag}" + (" (预发布)" if prerelease else "")
                  + (" (草稿)" if draft else "") + (f" 附件 {len(files)} 个" if files else ""))
     ghcli.run(gh, args, "创建发行版")
+    cache.flush()  # 刚改过发行版: 缓存里的旧数据作废
     console.done(f"发行版 {tag} 已创建   查看: gitx publish view {tag}")
 
 
@@ -156,6 +157,7 @@ def upload(tag: str, files: list[str], *, target: str = "", clobber: bool = Fals
         args.append("--clobber")
     console.step(f"上传 {len(files)} 个附件到 {tag} ...")
     ghcli.run(gh, args, "上传附件")
+    cache.flush()  # 刚改过发行版: 缓存里的旧数据作废
     console.done(f"已上传到发行版 {tag}")
 
 
@@ -179,6 +181,7 @@ def edit(tag: str, *, new_tag: str = "", target: str = "", title: str = "", note
     args += _bool_flag("--latest", latest)
     console.step(f"更新发行版 {tag} ...")
     ghcli.run(gh, args, "更新发行版")
+    cache.flush()  # 刚改过发行版: 缓存里的旧数据作废
     console.done(f"发行版 {new_tag or tag} 已更新")
 
 
@@ -193,4 +196,5 @@ def delete(tag: str, *, target: str = "", cleanup_tag: bool = False, yes: bool =
     if cleanup_tag:
         args.append("--cleanup-tag")
     ghcli.run(gh, args, "删除发行版")
+    cache.flush()  # 刚改过发行版: 缓存里的旧数据作废
     console.done(f"发行版 {tag} 已删除" + (" (标签一并删除)" if cleanup_tag else ""))

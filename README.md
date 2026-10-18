@@ -2,6 +2,21 @@
 
 给中国人用的 GitHub 加速与同步工具 —— 下载 / 同步 / 加速, 一条命令搞定。
 
+> **文档是按需读的, 别通读**: 本文件给用户 (装 / 用 / 配置), 实现要点在 `doc/开发.md`,
+> 发版步骤在 `doc/发布流程.md`, 给 AI agent 的命令速查在 `skill/gitx/SKILL.md`。
+> AI / 协作者请**只读当前任务相关的那一份**, 不要为了"了解全貌"把文档全读一遍。
+
+> **v1.0.6: 召唤守护进程 · 缓存 · 更多配置 (`daemon` / `cache` / `palette`)** ——
+> 新增 **守护进程** (`daemon = false`, 默认关): 开启后运行任意 gitx 命令会自动拉起一个预热进程,
+> 后续命令由它 fork 执行, 省掉每次重付的导入开销 (低配机 1-2 秒); 附带把配色换成**终端自己的调色板**
+> (`palette = auto|terminal|mocha`), 低配终端不必为 24 位真彩色买单。
+> 新增 **缓存** (`~/.cache/gitx`, 默认开): 只读 API 响应 (仓库概览 / 搜索 / 发布, 默认 5 分钟) 与
+> 远端默认分支探测 (1 小时) 记下来, 少跑网络也少用 API 限额; `gitx cache / list / prune / clear` 管理。
+> 新增 8 项常用配置: `daemon` / `daemon_idle` / `palette` / `cache` / `cache_ttl` / `remote` /
+> `search_limit` / `repos_limit` (全部真正生效)。
+> 另修掉**中文打不进选择器**的老问题 (questionary 只绑了 ASCII), 裸 `gitx` 欢迎页改为无边框两列,
+> 并把开发文档拆到 `doc/` (README 只留用户向内容, 且写明"按需读, 不要通读")。
+>
 > **v1.0.6-pre3: 交互式搜索 (`gitx search` / `gitx repos -q`)** ——
 > `gitx search` 不给关键词就是**交互式搜索**: 问一次搜索词 -> 结果表 -> ↑↓ 挑一个 -> 再选
 > 下载 / 看概览 / 打开网页, 挑完能接着挑下一个, 想换词就选「换个关键词再搜」
@@ -498,6 +513,37 @@ gitx proxy uninstall  # 移除上述规则
 gitx proxy test       # 测试加速源连通性(git 克隆 / raw / API; Release 独立设置时会一并测试)
 ```
 
+### 性能: 守护进程与缓存 (默认关闭 / 默认开启)
+
+**缓存** (`cache = true`, 默认开): 可再生的网络结果记在 `~/.cache/gitx`, 少跑一趟网络也少用一次
+API 限额 —— 目前记的是 GitHub API 的只读响应 (仓库概览 / 搜索 / 发布列表, 默认 5 分钟)、远端默认
+分支探测 (1 小时)。写操作 (如发布发行版) 之后缓存自动作废, 所以不会看到刚改完的旧数据。
+
+```bash
+gitx cache             # 缓存目录 + 占用 + 条目数
+gitx cache list        # 明细: 缓存键 / 写入时间 / 有效期 / 状态
+gitx cache prune       # 只清已过期的
+gitx cache clear       # 全清 (下次使用自动重建)
+```
+
+**召唤守护进程** (`daemon = false`, 默认关): 低配机上 Python 每次都要重新导入 typer / rich
+那一大堆模块 (约 1-2 秒), 占了 `gitx status` 这类命令的大半耗时。打开之后, 运行**任意** gitx
+命令时若发现后台没有守护进程, 就顺手拉起一个: 它先把这些模块导入好, 之后的命令把"参数 + 工作
+目录 + 环境变量 + 标准输入输出"交给它, 由它 **fork 一个已经预热的子进程**来执行 —— 省掉重复导入,
+每条命令仍跑在自己的进程里 (状态不互相污染, Ctrl+C 只影响当次)。附带的改动是配色: 开了守护进程
+后 `palette = auto` 会**用终端自己的调色板**而不是内置真彩色, 因此低配终端也不会因为 24 位色而卡顿;
+想固定用某一种就 `gitx config set palette mocha|terminal`。
+
+```bash
+gitx config set daemon true   # 打开 (之后第一条命令会自动召唤)
+gitx daemon                   # 看状态: 配置 / 进程 / 套接字 / 空闲退出 / 实际配色
+gitx daemon start|stop|restart
+```
+
+细节: 守护进程走 `~/.cache/gitx/daemon.sock` (Unix 域套接字, 不占端口、不监听网络), 空闲
+`daemon_idle` 秒 (默认 300) 自己退出, 不留常驻进程; 升级后版本号变了会自动让客户端回退本地执行;
+它起不来或半路断掉, 命令照常本地跑 —— 最坏只是没变快, 功能不受影响。
+
 ### 配置
 
 配置文件是 **TOML**（带中文注释, 人类可读可改）: `~/.config/gitx/config.toml`
@@ -513,6 +559,14 @@ gitx config set branch develop   # 默认分支 (下载时 URL 未带分支则�
 gitx config set dest ~/下载  # 默认下载目录 (支持 ~; 命令行给的路径优先)
 gitx config set resume false     # 关掉断点续传
 gitx config set sync_rebase false  # gitx sync 用合并而非变基 (--merge 仍可临时覆盖)
+gitx config set cache true       # 开启 ~/.cache/gitx 缓存 (接口响应 / 默认分支 / 版本查询)
+gitx config set cache_ttl 600    # 缓存有效期改成 10 分钟 (0 = 不缓存)
+gitx config set daemon true      # 召唤守护进程: 低配机上省掉每条命令的启动开销
+gitx config set daemon_idle 900  # 守护进程空闲 15 分钟后自己退出
+gitx config set palette terminal # 配色改用终端自己的调色板 (mocha = 内置真彩色)
+gitx config set remote upstream  # 默认远程名 (info / url / web / push 不带 -r 时用)
+gitx config set search_limit 20  # gitx search 的默认条数
+gitx config set repos_limit 50   # gitx repos 的默认条数
 gitx config set color never      # 关闭彩色输出 (auto / never)
 gitx config set assume_yes true  # 处处跳过确认, 相当于每条命令都带 -y
 gitx config set message 更新 # 默认提交信息
@@ -532,77 +586,29 @@ gitx dowload ...            # 子命令笔误会给出形近提示
 环境变量 `GITX_PROXY=off|v6|v4|gh-proxy|https://...` 可设置全局默认加速源,
 `GITX_RELEASE_PROXY=...` 单独覆盖 Release 功能的加速源。
 
-## 为什么快 (实测数字, 2026-10 经 v6.gh-proxy.org)
+## 开发与文档
 
-- **git 透传不加载 typer**: `gitx status` / `gitx --version` 由只依赖标准库的快速分发处理,
-  从 ~2.5s 降到 ~0.6s(含 uv 与 python 启动, 低配机器上); 加速源列表也不再靠多语言输出的
-  `git help -a` 猜测, 直接交给 git 自己执行。
-- **文件夹下载快 8 倍**: `git/git` 的一个子目录, 纯稀疏检出 30.7s / 14 MB → 部分克隆
-  (`--filter=blob:none --sparse`) 3.8s / 4.2 MB。只拉取目标目录的 blob。
-- **源码包路线**: `-x` 走 API 的 `/tarball/<ref>`, 单个 HTTP 流, 不要 git 历史时比克隆省一整个
-  git 握手与对象协商。
-- **断点续传**: 大附件中断不再从头下; `.part` 与目标不符(416 / 大小对不上)时自动丢弃重来。
-- **按需加载**: rich.progress / rich.prompt / urllib / shutil / questionary 全部用到才导入。
-- 并行下载实测**没有收益**(镜像按连接限速, 4 路并发比单路还慢), 故不做 —— 有证据才动刀。
+文档按"谁看"分册, **不要通读全部** (尤其 AI: 只读跟当前任务相关的那一份):
 
-## 原理
+| 要看什么 | 去哪看 |
+| --- | --- |
+| 装 / 升级 / 卸载 | [INSTALL.md](./INSTALL.md) |
+| 命令怎么用、有哪些配置 | 本文件 (上面那些章节) |
+| 实现要点 / 实测数字 / 源码结构 / 开发约定 | [doc/开发.md](./doc/开发.md) |
+| 怎么发版 (步骤清单) | [doc/发布流程.md](./doc/发布流程.md) |
+| 发布说明正文 (每版改写) | [RELEASE_TEMPLATE.md](./RELEASE_TEMPLATE.md) |
+| 给 AI agent 的命令速查与配置表 | [skill/gitx/SKILL.md](./skill/gitx/SKILL.md) |
 
-- 加速 = 在 GitHub 域名 URL 前拼镜像前缀, 如 `https://v6.gh-proxy.org/https://github.com/...`
-- Release 加速可**独立设置**: `release_proxy`(或 `GITX_RELEASE_PROXY`) 只作用于 `gitx release`
-  与发布页链接, 解析链 `--proxy > GITX_RELEASE_PROXY > release_proxy > GITX_PROXY > proxy`;
-  留空 = 跟随全局, 所以不设置时行为与旧版一致 —— 某个镜像对 API 限流时只需换 Release 那条链路
-- 拉取(克隆 / 下载 / Release 附件 / API)走加速; 推送走直连 —— 镜像对 `git push` 返回 405
-- 存在 URL 重写规则(全局或仓库本地 `--local`)时, 推送地址自动改用 SSH(gh 已配好密钥), 避免 https 推送被规则重写到镜像
-- `gitx proxy install` 利用 git 自身的 `url.<镜像>/.insteadOf` 规则, 全局生效
-- 分支自动探测:`git ls-remote --symref` 取默认分支(main/master)
-- 文件夹下载: 部分克隆 + 稀疏检出(`--filter=blob:none --sparse`), 检出时按需拉取目标目录的 blob
-- `gitx proxy auto` 用 `git ls-remote` 实测各加速源(含直连)克隆端点耗时, 选最快的
-- 命令分发: `gitx` 入口先走快速通道(git 透传 / --version), 其余交给 Typer 子命令;
-  首词像链接(https:// / git@ )就自动补 `download`
-- 需要写权限或账号态的功能(`publish` / `actions` / `auth` / `pr create`)全部交给已登录的 `gh`:
-  gitx 只拼参数、不接触令牌, 前置检查 (是否安装 / 是否登录) 与 JSON 解析集中在 `ghcli.py` 一处
-- `gitx ignore` 复用 github/gitignore 官方模板库, 索引缓存 7 天, 按名拉取 (raw 也走加速)
-
-## 源码结构
-
-```
-src/gitx/
-  __init__.py   入口: 快速分发先行, 需要时才加载 typer    dispatch.py   git 透传 / --version 快速通道 (仅标准库)
-  console.py    rich 控制台 (Catppuccin 主题)    config.py     持久化配置 (~/.config/gitx/config.toml, TOML + 自动迁移旧 JSON)
-  accel.py      加速源与测速                              gitcmd.py     git 命令封装 (前置检查/分支/推送/维护原语)
-  github.py     URL 解析 + REST API 客户端 (token 复用)   net.py        HTTP 下载: 断点续传 + 进度条
-  download.py   仓库/文件夹/源码包下载                    release.py    Release 附件(API)
-  repo.py       init / info / commit / diff / discard / clean / undo / graph / tidy / url
-  branch.py     branch / switch / merge / rebase / fetch
-  stash.py      暂存 (save / list / pop / apply / drop / show / clear)
-  tag.py        标签 (list / new / delete / push)
-  hub.py        search / stat / web / ignore
-  sync.py       push / pull / sync
-  remote.py     远程管理 (拉取加速 + 推送直连)      submodule.py  子模组 (拉取同样走加速)
-  pr.py         Pull Request 列表 / 详情 / 创建      cache.py      缓存查看与清理
-  ghcli.py      gh CLI 共用层 (定位 / 登录态 / 调用 / JSON 解析), publish + pr + actions + auth 共用
-  actions.py    Actions 运行与工作流 (list / view / watch / rerun / cancel / download / workflows / dispatch)
-  auth.py       账号登录态 (status / login / logout / switch / refresh / token / setup-git)
-  ghrepo.py     我的仓库 (挑一个 -> 编辑界面; list / edit / view / clone / create / fork / rename / archive / sync / star / delete)
-  upgrade.py    自更新 (加速下载 wheel 后 uv/pip 重装)
-```
-
-## 开发
+快速开始开发:
 
 ```bash
-uv run python -m gitx --help
-uv run python -m gitx release cli/cli --list   # API + 加速 的实测例子
-uv build --out-dir dist                         # 构建 sdist + wheel (发布用)
-uvx ruff check src/gitx                         # 静态检查 (规则见 pyproject.toml 的 [tool.ruff])
+uv run python -m gitx --help               # 跑源码 (不用先安装)
+uv run python -m gitx doctor               # 环境自检
+uv build --out-dir dist                    # 构建 wheel + 源码包 (发布用)
+uvx ruff check src/gitx                    # 静态检查 (规则见 pyproject.toml)
 ```
 
-## 发布
-
-按 [RELEASE_TEMPLATE.md](./RELEASE_TEMPLATE.md) 执行: 版本号双改 (`pyproject.toml` + `__init__.py`),
-`uv build --out-dir dist` 产出 `dist/gitx-X.Y.Z.tar.gz` 与 `dist/gitx-X.Y.Z-py3-none-any.whl`,
-打 tag 后用 `gitx publish create <标签> dist/*.tar.gz dist/*.whl -T "gitx X.Y.Z" -F -` (或 `gh release create`)
-**同时上传这两个附件** (源码包 + wheel), 上传后再下载验证 wheel 可安装。
-预发布版本号写成 `X.Y.Z-preN` 并加 `-p` (uv 会按 PEP 440 归一化成 `rcN`, 附件名是 `gitx-X.Y.ZrcN*`, 不是笔误)。
+本仓库的版本管理与提交用 `jj` (colocated: `.jj/` 与 `.git/` 并存), 写操作别用 git 命令。
 
 ## 许可
 

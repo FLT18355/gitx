@@ -25,6 +25,14 @@ DEFAULTS: dict[str, object] = {
     "message": "日常同步更新",  # push 默认提交信息
     "sync_rebase": True,      # gitx sync 默认变基
     "token": "",              # GitHub API token
+    "cache": True,            # 启用 ~/.cache/gitx 缓存
+    "cache_ttl": 300,         # 接口结果的缓存秒数
+    "daemon": False,          # 召唤守护进程 (低配机加速)
+    "daemon_idle": 300,       # 守护进程空闲多久退出
+    "palette": "auto",        # 配色: auto / terminal / mocha
+    "remote": "origin",       # 默认远程名
+    "search_limit": 10,       # gitx search 默认条数
+    "repos_limit": 30,        # gitx repos 默认条数
     "color": "auto",          # 彩色输出
     "assume_yes": False,      # 处处跳过确认 (= -y)
 }
@@ -40,6 +48,16 @@ _COMMENTS: dict[str, str] = {
     "message": "gitx push / sync 不带备注时用的提交信息",
     "sync_rebase": "gitx sync 先拉再推时用变基(true)还是合并(false)",
     "token": "GitHub API token, 把限额从 60 提到 5000 次/小时 (显示时自动打码)",
+    "cache": "把可再生的结果记到 ~/.cache/gitx (接口响应 / 默认分支 / 版本查询), 省往返也省限额",
+    "cache_ttl": "接口结果的缓存秒数 (默认 300 = 5 分钟; 0 = 不缓存, 改完即可生效)",
+    "daemon": "召唤守护进程: 低配机开启后, 运行任意 gitx 命令时会自动拉起一个预热好的后台进程, "
+              "后续命令由它 fork 执行, 省掉重复导入 (~1-2 秒); 默认关闭",
+    "daemon_idle": "守护进程空闲多少秒后自己退出 (不留常驻进程)",
+    "palette": "配色: auto(开了守护进程就用终端自己的配色) / terminal(总是用终端配色) / "
+               "mocha(总是用内置 Catppuccin 真彩色)",
+    "remote": "默认远程名 (gitx info / url / web / push 等不带 -r 时用它)",
+    "search_limit": "gitx search 不带 -n 时的条数",
+    "repos_limit": "gitx repos / repos list 不带 -n 时的条数",
     "color": "彩色输出: auto(自动检测) / never(关闭颜色)",
     "assume_yes": "处处跳过确认, 相当于每条命令都带 -y (危险操作仍建议人工确认)",
 }
@@ -47,7 +65,8 @@ _COMMENTS: dict[str, str] = {
 # 类型校验用的元数据
 _BOOL_KEYS = frozenset(k for k, v in DEFAULTS.items() if isinstance(v, bool))
 _INT_KEYS = frozenset(k for k, v in DEFAULTS.items() if isinstance(v, int) and not isinstance(v, bool))
-_CHOICES: dict[str, tuple[str, ...]] = {"color": ("auto", "never")}
+_CHOICES: dict[str, tuple[str, ...]] = {"color": ("auto", "never"),
+                                        "palette": ("auto", "terminal", "mocha")}
 
 _BOOL_WORDS: dict[str, bool] = {
     "true": True, "yes": True, "on": True, "1": True, "y": True, "是": True, "对": True,
@@ -216,8 +235,10 @@ def _dump(data: dict) -> str:
         ("加速", ("proxy", "release_proxy")),
         ("下载", ("depth", "branch", "dest", "resume")),
         ("同步", ("message", "sync_rebase")),
-        ("API", ("token",)),
-        ("界面", ("color", "assume_yes")),
+        ("API 与缓存", ("token", "cache", "cache_ttl")),
+        ("性能", ("daemon", "daemon_idle")),
+        ("界面", ("color", "palette", "assume_yes")),
+        ("默认值", ("remote", "search_limit", "repos_limit")),
     ]
     keys_done: set[str] = set()
     for title, keys in groups:
@@ -257,6 +278,31 @@ def default_dest() -> str:
     """配置的默认下载目录 (展开 ~); 未设置返回空串 (= 当前目录)。"""
     dest = str(load().get("dest") or "").strip()
     return os.path.expanduser(dest) if dest else ""
+
+
+def default_remote(cfg: dict | None = None) -> str:
+    """默认远程名 (配置 remote); 缺省 origin。"""
+    data = load() if cfg is None else cfg
+    return str(data.get("remote") or "origin").strip() or "origin"
+
+
+def default_limit(key: str, fallback: int, cfg: dict | None = None) -> int:
+    """取一个"条数"配置 (search_limit / repos_limit); 非法值回退 fallback。"""
+    data = load() if cfg is None else cfg
+    try:
+        value = int(data.get(key, fallback))
+    except (TypeError, ValueError):
+        return fallback
+    return value if value > 0 else fallback
+
+
+def palette_mode() -> str:
+    """生效的配色: auto / terminal / mocha (auto = 开了守护进程就用终端配色)."""
+    cfg = load()
+    mode = str(cfg.get("palette") or "auto").strip().lower()
+    if mode == "auto":
+        return "terminal" if cfg.get("daemon") else "mocha"
+    return mode if mode in ("terminal", "mocha") else "mocha"
 
 
 def release_source(cfg: dict | None = None) -> str:

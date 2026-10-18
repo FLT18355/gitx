@@ -31,7 +31,7 @@ SUBCOMMANDS = frozenset({
     "stash", "tag", "commit", "diff", "discard", "clean",
     "search", "stat", "web", "ignore",
     "proxy", "config", "doctor", "git",
-    "remote", "submodule", "pr", "cache", "upgrade", "actions", "auth", "repos",
+    "remote", "submodule", "pr", "cache", "upgrade", "actions", "auth", "daemon", "repos",
 })
 
 # 只接管自家子命令的命令: 其余参数 (gitx remote -v / gitx submodule foreach) 仍透传 git

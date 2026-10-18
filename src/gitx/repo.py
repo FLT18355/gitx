@@ -80,8 +80,9 @@ def info(path: str = ".") -> None:
 
     _, root = gitcmd.capture(["git", "-C", path, "rev-parse", "--show-toplevel"])
     branch = gitcmd.current_branch(path) or "(尚无提交)"
-    fetch = gitcmd.remote_url("origin", path)
-    push = gitcmd.remote_push_url("origin", path)
+    remote = config.default_remote()
+    fetch = gitcmd.remote_url(remote, path)
+    push = gitcmd.remote_push_url(remote, path)
     if fetch:
         remote = fetch + (f"  (推送: {push})" if push and push != fetch else "")
     else:
@@ -268,7 +269,8 @@ def tidy(path: str = ".", *, prune: bool = False, run_gc: bool = False,
 _TRANSPORTS = ("accel", "https", "ssh")
 
 
-def url(path: str = ".", transport: str = "", remote: str = "origin") -> None:
+def url(path: str = ".", transport: str = "", remote: str = "") -> None:
+    remote = remote or config.default_remote()
     """gitx url —— 查看/切换 origin 的地址形态: accel(加速) / https(直连) / ssh."""
     gitcmd.require_repo(path)
     names = gitcmd.remote_names(path)

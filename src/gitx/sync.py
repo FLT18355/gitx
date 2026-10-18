@@ -7,14 +7,15 @@ from . import accel, config, console, gitcmd, github
 
 def do_pull(path: str = ".", rebase: bool = False, no_proxy: bool = False) -> None:
     gitcmd.require_repo(path)
-    if not gitcmd.remote_url("origin", path):
+    remote = config.default_remote()
+    if not gitcmd.remote_url(remote, path):
         console.error("没有远程仓库, 用: gitx push to <仓库地址> 先关联")
     prefix = config.active_proxy(no_proxy=no_proxy)
     branch = gitcmd.current_branch(path)
     if branch and not gitcmd.has_upstream(path):
-        if gitcmd.remote_branch_exists("origin", branch, path, prefix):
-            gitcmd.set_upstream("origin", branch, path)
-            console.info(f"已关联上游: origin/{branch}")
+        if gitcmd.remote_branch_exists(remote, branch, path, prefix):
+            gitcmd.set_upstream(remote, branch, path)
+            console.info(f"已关联上游: {remote}/{branch}")
         else:
             console.info(f"远端还没有分支 {branch}, 无需拉取 (直接 gitx push 即可)")
             return

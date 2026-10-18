@@ -1,7 +1,8 @@
 """我的 GitHub 仓库管理 (交给已安装并登录的 gh): 挑一个仓库 -> 进仓库编辑界面.
 
   gitx repos                       上下键挑仓库 -> 进编辑界面, 一项一项地改
-  gitx repos list                  列出我的仓库 (表格)
+  gitx repos -q <关键词>            按关键词搜仓库 (搜得到全部, 不受 -n 限制)
+  gitx repos list                  列出我的仓库 (表格; 给 -q 就是搜索结果)
   gitx repos edit [仓库]            改描述 / 主页 / 话题 / 可见性 / 默认分支 / 功能开关 / 模板
   gitx repos view [仓库]            看详情 (--web 打开网页)
   gitx repos clone [仓库]           克隆到本地 (公开走加速; 私有交给 gh)
@@ -103,6 +104,84 @@ def fetch_repos(owner: str = "", *, limit: int = DEFAULT_LIMIT, **filters: objec
     return data
 
 
+# gh search repos 的字段与 gh repo list 不同 (fullName / stargazersCount; language 是字符串),
+# 且给不了 模板 / 收藏 / 话题 / 议题开关 —— 这里统一成编辑界面认的那套, 缺的项由 fetch_repo 补齐。
+SEARCH_FIELDS = ("fullName,description,visibility,isPrivate,isFork,isArchived,stargazersCount,"
+                 "language,defaultBranch,homepage,updatedAt,pushedAt,url")
+_PARTIAL = "_partial"  # 标记: 这条结果来自搜索, 进编辑界面前要用 fetch_repo 补全
+
+
+def _normalize(item: dict) -> dict:
+    """把 gh search repos 的一条结果翻成 gh repo list 的形状."""
+    lang = str(item.get("language") or "")
+    branch = str(item.get("defaultBranch") or "")
+    return {
+        _PARTIAL: True,
+        "nameWithOwner": str(item.get("fullName") or ""),
+        "description": item.get("description") or "",
+        "visibility": str(item.get("visibility") or "").lower(),
+        "isPrivate": bool(item.get("isPrivate")),
+        "isFork": bool(item.get("isFork")),
+        "isArchived": bool(item.get("isArchived")),
+        "isTemplate": False,
+        "viewerHasStarred": False,
+        "stargazerCount": int(item.get("stargazersCount") or 0),
+        "primaryLanguage": {"name": lang} if lang else None,
+        "homepageUrl": item.get("homepage") or "",
+        "defaultBranchRef": {"name": branch} if branch else None,
+        "repositoryTopics": [],
+        "updatedAt": item.get("updatedAt") or "",
+        "pushedAt": item.get("pushedAt") or "",
+        "url": item.get("url") or "",
+    }
+
+
+def _search_args(keyword: str, owner: str, limit: int, *, visibility: str = "",
+                 source: bool = False, forks: bool = False, archived: bool = False,
+                 no_archived: bool = False, language: str = "", topic: str = "") -> list[str]:
+    """gh search repos 的参数 (过滤项名字与 gh repo list 略有不同, 转发到对应开关)."""
+    args = ["search", "repos", keyword, "--owner", owner or "@me",
+            "-L", str(max(1, int(limit))), "--json", SEARCH_FIELDS]
+    if visibility:
+        args += ["--visibility", visibility]
+    if language:
+        args += ["--language", language]
+    if topic:
+        args += ["--topic", topic]
+    if archived:
+        args += ["--archived", "true"]
+    if no_archived:
+        args += ["--archived", "false"]
+    if source:
+        args += ["--include-forks", "false"]
+    if forks:
+        args += ["--include-forks", "only"]
+    return args
+
+
+def search_repos(keyword: str, owner: str = "", *, limit: int = DEFAULT_LIMIT,
+                 **filters: object) -> list[dict]:
+    """按关键词搜仓库 (仓库名 / 描述命中), 不受"只取前 -n 个"的限制."""
+    gh = _gh()
+    text = keyword.strip()
+    if not text:
+        console.error("请给搜索词: gitx repos -q <关键词>")
+    console.step(f"搜索{owner or '我的'}仓库: {text}")
+    args = _search_args(text, owner, limit, **filters)  # type: ignore[arg-type]
+    data = ghcli.json_out(gh, args, "搜索仓库")
+    if not isinstance(data, list):
+        console.error("仓库数据异常, 请稍后重试")
+    return [_normalize(item) for item in data if isinstance(item, dict)]
+
+
+def fetch(keyword: str = "", owner: str = "", *, limit: int = DEFAULT_LIMIT,
+          **filters: object) -> list[dict]:
+    """有搜索词就搜 (搜得到全部), 没有就按最近推送列前 limit 个; 两者字段已统一."""
+    if keyword.strip():
+        return search_repos(keyword, owner, limit=limit, **filters)
+    return fetch_repos(owner, limit=limit, **filters)
+
+
 def fetch_repo(target: str) -> dict:
     """单个仓库的当前设置 (编辑界面的数据源)."""
     gh = _gh()
@@ -156,26 +235,60 @@ def _label(index: int, repo: dict) -> str:
     return f"{index}. {repo.get('nameWithOwner') or ''}  ({_state(repo)})"
 
 
-def pick_repo(owner: str = "", *, limit: int = DEFAULT_LIMIT,
-              message: str = "", **filters: object) -> dict | None:
+_SEARCH_CHOICE = "⌕ 用关键词搜全部仓库 (不受 -n 限制)"
+
+
+def _ask_keyword(current: str = "") -> str:
+    """问一次搜索词; 留空 = 回到原列表, Ctrl+C 也一样 (都不算错)."""
+    answer = console.text("搜什么? (仓库名 / 描述 / 语言里的词)", default=current,
+                          instruction="[回车] 开始搜索  [清空] 回到列表  [Ctrl+C] 返回")
+    return "" if answer is None else answer.strip()
+
+
+def pick_repo(owner: str = "", *, limit: int = DEFAULT_LIMIT, message: str = "",
+              keyword: str = "", **filters: object) -> dict | None:
     """上下键挑一个仓库 (最多渲染 5 行, 打字即筛选); Ctrl+C 返回 None.
 
-    非交互环境直接取第一个 (脚本里请显式给仓库名, 别依赖这个兜底)。
+    列表底部有一条"用关键词搜全部仓库": 选它就能输入关键词去 GitHub 搜 (搜得到全部,
+    不受 -n 的"只取前几个"限制), 搜完接着在这里挑, 因此仓库多也不用把 -n 调大。
+    搜索结果缺几个字段 (模板 / 收藏 / 话题), 挑中后会再 fetch_repo 一次补齐。
+
+    非交互环境直接报错 (脚本里请显式给仓库名, 别依赖这个兜底)。
     """
     if not console.is_terminal():
         console.error("挑仓库需要交互终端\n提示: 非交互请直接给出仓库名, 如 gitx repos view owner/repo")
-    repos = fetch_repos(owner, limit=limit, **filters)
-    if not repos:
-        console.error("没有找到仓库\n提示: 换个过滤条件, 或 gitx repos create <名字> 新建一个")
-    where = f"{owner} 的" if owner else "我的"
-    head = message or f"选择仓库 ({where}前 {len(repos)} 个, 输入名字 / 语言 即筛选)"
-    index = console.select(head, [_label(i, repo) for i, repo in enumerate(repos, 1)],
-                           instruction="[↑↓] 选择  [输入] 筛选  [回车] 确认")
-    return None if index is None else repos[index]
+    while True:
+        repos = fetch(keyword, owner, limit=limit, **filters)
+        if not repos:
+            if keyword:
+                console.warn(f"没有匹配 {keyword!r} 的仓库, 回到列表")
+                keyword = ""
+                continue
+            console.error("没有找到仓库\n提示: 换个过滤条件, 或 gitx repos create <名字> 新建一个")
+        where = f"{owner} 的" if owner else "我的"
+        if message:
+            head = message
+        elif keyword:
+            head = f"搜索 {keyword!r} 的结果 ({len(repos)} 个)"
+        else:
+            head = f"选择仓库 ({where}前 {len(repos)} 个, 输入名字 / 语言 即筛选)"
+        labels = [_label(i, repo) for i, repo in enumerate(repos, 1)]
+        # 列表被 -n 截断 (可能还有更多), 或已经在搜索: 都给一个"换关键词再搜"的入口
+        if keyword or len(repos) >= limit:
+            labels.append(_SEARCH_CHOICE)
+        index = console.select(head, labels, instruction="[↑↓] 选择  [输入] 筛选  [回车] 确认")
+        if index is None:
+            return None
+        if index == len(repos):  # 选了"用关键词搜全部仓库"
+            keyword = _ask_keyword(keyword)
+            continue
+        picked = repos[index]
+        nwo = str(picked.get("nameWithOwner") or "")
+        return fetch_repo(nwo) if picked.get(_PARTIAL) else picked
 
 
-def resolve(target: str = "", *, owner: str = "", limit: int = DEFAULT_LIMIT,
-            what: str = "", **filters: object) -> str:
+def resolve(target: str = "", *, owner: str = "", limit: int = DEFAULT_LIMIT, what: str = "",
+            keyword: str = "", **filters: object) -> str:
     """子命令的仓库参数: 给了就用它, 没给且终端里就上下键挑一个 (最多渲染 5 行).
 
     挑不到 (取消 / 非交互) 就中文提示并退出, 因此各子命令都能写成
@@ -186,7 +299,8 @@ def resolve(target: str = "", *, owner: str = "", limit: int = DEFAULT_LIMIT,
     if not console.is_terminal():
         console.error(f"请给出仓库: gitx repos {what or 'edit'} <owner/repo>\n"
                       "提示: 直接 gitx repos 可以上下键挑一个, 再进编辑界面")
-    picked = pick_repo(owner, limit=limit, message=f"选择要{what}的仓库" if what else "", **filters)
+    picked = pick_repo(owner, limit=limit, keyword=keyword,
+                       message=f"选择要{what}的仓库" if what else "", **filters)
     if picked is None:  # 挑选器里 Ctrl+C: 与其它交互命令一致, 算取消而不是出错
         console.warn("已取消")
         raise SystemExit(0)
@@ -214,15 +328,21 @@ def _repo_table(repos: list[dict], title: str) -> None:
     console.print(table)
 
 
-def list_repos(owner: str = "", *, limit: int = DEFAULT_LIMIT, **filters: object) -> None:
-    """列出仓库: 仓库 / 描述 / 可见性 / star / 语言 / 更新 / 标记."""
-    repos = fetch_repos(owner, limit=limit, **filters)
+def list_repos(owner: str = "", *, limit: int = DEFAULT_LIMIT, keyword: str = "",
+               **filters: object) -> None:
+    """列出仓库: 仓库 / 描述 / 可见性 / star / 语言 / 更新 / 标记 (给关键词 = 搜索结果)."""
+    repos = fetch(keyword, owner, limit=limit, **filters)
     where = f"{owner} 的" if owner else "我的"
     if not repos:
+        if keyword:
+            console.info(f"没有匹配 {keyword!r} 的仓库 (换个词试试)\n"
+                         "提示: 不带 -q 就是按最近推送列出前 -n 个")
+            return
         console.info(f"{where}仓库 0 个 (换个过滤条件看看)\n"
                      "提示: gitx repos list --no-archived --source 只看未归档的非复刻仓库")
         return
-    _repo_table(repos, f"{where}仓库 {len(repos)} 个")
+    title = f"搜索 {keyword!r}: {len(repos)} 个" if keyword else f"{where}仓库 {len(repos)} 个"
+    _repo_table(repos, title)
     console.info("进编辑界面改设置: gitx repos   |   看某一个: gitx repos view <owner/repo>")
 
 
@@ -662,7 +782,7 @@ def _exists(nwo: str) -> bool:
     return ghcli.capture(gh, ["repo", "view", nwo, "--json", "nameWithOwner"])[0] == 0
 
 
-def shell(target: str = "", *, owner: str = "", limit: int = DEFAULT_LIMIT,
+def shell(target: str = "", *, owner: str = "", limit: int = DEFAULT_LIMIT, keyword: str = "",
           **filters: object) -> None:
     """交互式仓库管理: 上下键挑仓库 -> 进编辑界面, 一项一项地改到满意.
 
@@ -671,7 +791,8 @@ def shell(target: str = "", *, owner: str = "", limit: int = DEFAULT_LIMIT,
     if not console.is_terminal():
         console.error("编辑界面需要交互终端\n"
                       "提示: 非交互请用 gitx repos edit <owner/repo> 直接给选项")
-    repo = fetch_repo(target) if target else pick_repo(owner, limit=limit, **filters)
+    repo = (fetch_repo(target) if target
+            else pick_repo(owner, limit=limit, keyword=keyword, **filters))
     if repo is None:
         console.warn("已取消")
         return
@@ -685,12 +806,14 @@ def shell(target: str = "", *, owner: str = "", limit: int = DEFAULT_LIMIT,
             return
         action = _ACTIONS[index][0]
         if action == "switch":
-            repo = pick_repo(owner, limit=limit, message="换成哪个仓库?", **filters) or repo
+            repo = pick_repo(owner, limit=limit, keyword=keyword,
+                             message="换成哪个仓库?", **filters) or repo
             continue
         repo = _act(action, repo)
         if repo is None:
             console.warn("仓库已删除")
-            repo = pick_repo(owner, limit=limit, message="继续管理哪个仓库?", **filters)
+            repo = pick_repo(owner, limit=limit, keyword=keyword,
+                             message="继续管理哪个仓库?", **filters)
             if repo is None:
                 console.info("已退出仓库编辑界面")
                 return

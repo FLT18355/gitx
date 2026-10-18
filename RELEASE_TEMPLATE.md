@@ -1,89 +1,65 @@
-# gitx v1.0.6-pre2 发布说明
+# gitx v1.0.6-pre3 发布说明
 
 ## 🎉 新增
 
-- **`gitx repos`: 我的仓库一条龙** —— 上下键挑一个仓库(最多同时渲染 5 行, 超出的随光标滚动, 打字即筛选) ->
-  进**仓库编辑界面**: 先摊开当前设置(描述 / 主页 / 话题 / 可见性 / 默认分支 / 功能开关 / 模板 / star),
-  再一项一项地改, 改完自动刷新, 选"完成"退出; 列表 / 克隆 / 新建 / 复刻 / 改名 / 归档 / 同步 / 收藏 /
-  设为默认 / 删除一应俱全, 全部交给已登录的 `gh`。
+- **`gitx search`: 交互式搜索** —— 不给关键词就进交互界面: 先问一次搜索词(回车沿用上次的词), 结果照常列成表,
+  再上下键挑一个仓库(直接打字即筛选), 然后选对它做什么 —— **下载到本地**(走加速) / **看仓库概览**(`gitx stat`
+  同一套输出) / **打开网页**; 挑完能接着挑下一个, 想换关键词就选「换个关键词再搜」, 因此一轮搜索里可以
+  连着挑好几个仓库。`-i` 供"带了关键词也想进这个界面"的场合, `-d` 仍是"搜完直接挑一个下载"的快捷方式。
 
   ```bash
-  gitx repos                     # 挑仓库 -> 编辑界面 (改描述 / 话题 / 可见性 ...)
-  gitx repos -n 5                # 只取最近 5 个仓库来挑 (只想看前几个就给个小数字)
-  gitx repos -n 5 delete         # 子命令也能省略仓库: 只在前 5 个里挑一个删
-  gitx repos edit owner/repo     # 跳过挑选, 直接进这个仓库的编辑界面
-  gitx repos edit owner/repo -d "新描述" -t cli --no-wiki   # 非交互: 直接给选项
-  gitx repos star cli/cli        # 收藏 (unstar 取消)
+  gitx search                              # 问关键词 -> 结果表 -> 挑一个 -> 下载 / 概览 / 网页
+  gitx search -i "vim 插件"                 # 带着关键词进交互界面 (挑完还能接着挑)
+  gitx search "vim 插件" --language go -d   # 老用法不变: 搜完直接挑一个下载
   ```
 
-- **`gitx actions`: Actions 运行一条龙** —— 不再需要开网页看 CI: 运行列表 / 详情(作业表与耗时, `--verbose` 连步骤) /
-  日志 / 实时盯 / 重跑 / 取消 / 产物下载 / 工作流列表 / 手动触发, 全部交给已登录的 `gh`。
+- **`gitx repos`: 会搜了** —— `-q/--search` 走 `gh search repos`, 按关键词搜仓库, **搜得到全部**,
+  不再受 `-n` 的"只取前几个"限制; 挑选器底部还加了一条「用关键词搜全部仓库」, 挑着挑着想起关键词,
+  选中它就能现场搜一遍再接着挑。搜索结果缺的字段(模板 / 收藏 / 话题)由 `gh repo view` 补齐,
+  因此编辑界面的显示与修改都不受影响。
 
   ```bash
-  gitx actions                          # 最近运行: 状态 / 工作流 / 标题 / 分支 / 触发 / 时间
-  gitx actions -b main -s failure        # 只看 main 上失败的
-  gitx actions view 1234 --verbose       # 作业 + 步骤 + 每步耗时
-  gitx actions view 1234 --log-failed    # 只看失败步骤的日志
-  gitx actions rerun 1234 --failed       # 只重跑失败的作业
-  gitx actions download 1234 -D 产物目录  # 下载运行产物
-  gitx actions dispatch build.yml -F version=1.0.6   # 手动触发 workflow_dispatch
+  gitx repos -q dotfile              # 搜自己的仓库 (全量)
+  gitx repos -q pet list             # 子命令与 -q 可组合
+  gitx repos -o cli -q "cli tool"    # 搜别人的仓库 (-o 谁的)
   ```
 
-- **`gitx auth`: 账号与登录态** —— 状态表(当前账号标出来) / 登录 / 退出 / 切换 / 调权限 / 取令牌 / 配 git 凭据;
-  `gitx auth token --save` 把 gh 的令牌写进 gitx 配置, 只读 API 限额从 60 次/小时升到 5000 次/小时。
+## 🐛 修复
 
-  ```bash
-  gitx auth                      # 登录了哪些账号
-  gitx auth login --web          # 浏览器登录
-  gitx auth switch               # 切换当前账号
-  gitx auth refresh -s workflow  # 补权限
-  gitx auth token --save         # 令牌进 gitx 配置 (API 限额 60 -> 5000)
-  ```
+- **选择器里中文打不进去**(所有交互界面): questionary 的"打字即筛选"只绑定了 ASCII 字符, 中文按键会落到
+  它自己的 "Disallow inserting other text" 分支上被丢弃 —— 于是 `归档 / 下载 / 搜索` 这类中文项, 按提示
+  "打字筛选"其实无效。gitx 现在补了一份 `Keys.Any` 绑定并放在它前面(同优先级时先注册者先匹配),
+  中文能直接当筛选词, 英文 / 方向键 / 空格勾选的老行为不变。
 
-  | 附件 | 说明 |
-  | --- | --- |
-  | `gitx-1.0.6rc1-py3-none-any.whl` | uv 构建的 wheel (`uv tool install <whl>`, 支持 `gitx upgrade` 自更新) |
-  | `gitx-1.0.6rc1.tar.gz` | 源码包 (审计源码 / 无 wheel 环境) |
+## 🎨 调整
 
-## ♻️ 技术细节
-
-- 新增 `ghcli.py`: `gh` 共用层 —— `find` / `require`(安装 + 登录检查) / `run` / `capture` / `json_out` /
-  `repo_args`; 原来散在 `publish.py` 与 `pr.py` 的重复实现全部迁过来, `publish` / `pr` / `actions` / `auth` 共用一套
-- 新增 `actions.py`: 拼 `gh run list|view|watch|rerun|cancel|download` 与 `gh workflow list|run` 参数;
-  `list` / `view` / `workflows` 取 `--json` 后用 Rich 表格渲染 (状态与结论译成中文, 耗时按 ISO 时间对算出 `1m23s`);
-  `--log` / `--log-failed` / `watch` / `dispatch` 等交互与流式输出原样透传给 `gh`
-- 新增 `auth.py`: `gh auth status` 取 `--json hosts` 渲染成状态表 (没登录时给中文提示, 而非 gh 的英文原文);
-  `login` / `logout` / `switch` / `refresh` / `setup-git` 原样透传; `token --save` 把令牌写进 `~/.config/gitx/config.toml`
-- `cli.py`: 新增 `actions` 命令组 (list / view / watch / rerun / cancel / download / workflows / dispatch) 与
-  `auth` 命令组 (status / login / logout / switch / refresh / token / setup-git), 面板「工作流 (Actions 运行)」与「账号 (登录态)」
-- `dispatch.py`: `actions` / `auth` 加入自有子命令表 (git 无同名命令, 不影响透传)
-- 下载侧一行未动: `gitx release` 仍是 API + 加速的只读路径 (不需要 gh)
+- **裸 `gitx` 的欢迎页不再画表格**: 换成无边框的对齐两列(命令 + 说明), 窄终端里说明折行会缩进到命令列
+  之后, 而不是回到行首 —— 内容与顺序不变, 只是不再有横竖线, 窄终端下也不再被边框挤走正文。
 
 ## 📦 安装/升级
 
 ```bash
 # 方式 1: wheel (uv tool, 带自更新 gitx upgrade)
-uv tool install gitx-1.0.6rc1-py3-none-any.whl
+uv tool install gitx-1.0.6rc3-py3-none-any.whl
 
 # 方式 2: 源码
 uv tool install .        # 或: uv tool install git@github.com:FLT18355/gitx.git
 
 # 验证
-gitx --version           # 应输出 gitx 1.0.6-pre2
-gitx repos -n 5          # 挑一个我的仓库 -> 进编辑界面 (需要已安装并登录的 gh)
-gitx repos view cli/cli  # 看别人仓库的当前设置 (只读)
-gitx actions -n 5        # 看最近的 Actions 运行 (需要已安装并登录的 gh)
-gitx auth                # 看登录了哪些账号
+gitx --version           # 应输出 gitx 1.0.6-pre3
+gitx                     # 欢迎页: 无边框的两列速查
+gitx search              # 不给关键词 = 交互式搜索 (需要终端)
+gitx repos -q dotfile     # 按关键词搜自己的仓库 (需要已安装并登录的 gh)
 ```
 
 ## 🔗 相关
 
-- 源码: https://github.com/FLT18355/gitx/tree/v1.0.6-pre2
-- 完整变更: `git log v1.0.6-pre1..v1.0.6-pre2 --oneline`
+- 源码: https://github.com/FLT18355/gitx/tree/v1.0.6-pre3
+- 完整变更: `git log v1.0.6-pre2..v1.0.6-pre3 --oneline`
 
 ---
 
-*发布于: 2026-10-15*
+*发布于: 2026-10-18*
 
 <!-- ================================================================
      以下是发布流程规范 (不随发布说明一起贴出), 每次发版必须遵守。

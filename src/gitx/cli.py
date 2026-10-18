@@ -8,7 +8,7 @@
   发行版管理 (publish: 创建 / 上传附件 / 编辑 / 删除, 交给已登录的 gh)
   工作流 (actions: 运行列表 / 详情 / 日志 / 重跑 / 产物下载, 交给 gh)
   账号 (auth: 登录 / 退出 / 切换 / 权限 / 令牌, 交给 gh)
-  我的仓库 (repos: 挑一个仓库 -> 进编辑界面改设置 / 克隆 / 归档 / 删除, 交给 gh)
+  我的仓库 (repos: 挑 / 搜一个仓库 -> 进编辑界面改设置 / 克隆 / 归档 / 删除, 交给 gh)
 非 gitx 自己的词一律透传 git (gitx status / gitx log --oneline), 这条快速通道
 由 dispatch.py 在导入 typer 之前处理, 因此几乎瞬时完成。
 """
@@ -63,7 +63,9 @@ _EPILOG = """[key]示例[/key]
   gitx auth token --save                            复用 gh 的令牌, 把 API 限额提到 5000 次/小时
   gitx repos                                       上下键挑我的仓库 -> 进编辑界面 (改描述 / 话题 / 可见性)
   gitx repos -n 5                                  只取最近 5 个仓库来挑 (超出的不上屏)
+  gitx repos -q dotfile                            按关键词搜仓库 (搜得到全部, 不受 -n 限制)
   gitx search "cli 工具" --language go -d           搜仓库并下载第 1 个
+  gitx search                                      交互式搜: 问关键词 -> 挑一个 -> 下载 / 概览 / 网页
   gitx stat cli/cli                                 看仓库概览 (★ star / topics / 语言 / 贡献者)
   gitx graph -n 30                                  带图形的提交历史
   gitx switch -c 新功能                              新建分支并切换
@@ -113,14 +115,14 @@ _WELCOME_TIPS: tuple[tuple[str, str], ...] = (
     ("gitx branch", "分支表; 切换 switch / 合并 merge / 变基 rebase"),
     ("gitx stash / gitx tag", "暂存与标签的保存 / 查看 / 恢复"),
     ("gitx commit -m / gitx diff", "提交改动 / 查看上色 diff"),
-    ("gitx search <关键词>", "搜索 GitHub 仓库 (加 -d 直接下载)"),
+    ("gitx search [关键词]", "搜仓库; 不写关键词 = 交互式挑, 可下载 / 看概览"),
     ("gitx stat owner/repo", "仓库信息: star / 语言 / 贡献者 / 最新发布"),
     ("gitx proxy auto", "实测测速, 自动选用最快的加速源"),
     ("gitx remote", "查看/添加远程 (拉取加速, 推送直连)"),
     ("gitx pr / gitx submodule", "PR 列表与详情 / 子模组一条龙 (走加速)"),
     ("gitx actions", "Actions 运行: 列表 / 日志 / 重跑 / 产物下载 (交给 gh)"),
     ("gitx auth", "登录状态 / 切换账号 / 取令牌 (--save 提升 API 限额)"),
-    ("gitx repos", "挑一个我的仓库 -> 进编辑界面改设置 (描述 / 话题 / 可见性 ...)"),
+    ("gitx repos", "挑/搜我的仓库 (-q 关键词) -> 进编辑界面改设置"),
     ("gitx upgrade", "自更新到最新版本 (下载走加速)"),
     ("gitx -h", "查看全部命令与选项"),
 )
@@ -138,10 +140,7 @@ def _welcome() -> None:
     console.print(console.styled(f"[dim]拉取[/dim] {escape(pull)} "
                                  "[dim]· 推送直连 GitHub[/dim]"))
     console.print()
-    tips = console.table("常用命令", "说明", title="快速上手")
-    for cmd, desc in _WELCOME_TIPS:
-        tips.add_row(console.txt(cmd), console.txt(desc))
-    console.print(tips)
+    console.quicklist(_WELCOME_TIPS, title="快速上手")
     console.info("环境自检: gitx doctor   |   其它词透传 git: gitx status / gitx log --oneline")
 
 
@@ -690,34 +689,124 @@ def clean(
 
 @app.command(rich_help_panel=PANEL_HUB)
 def search(
-    keyword: Annotated[str, typer.Argument(metavar="关键词", help="搜索词, 如 'cli 工具'")],
+    keyword: Annotated[str | None, typer.Argument(
+        metavar="[关键词]", help="搜索词, 如 'cli 工具'; 留空 = 交互式搜索")] = None,
     limit: Annotated[int, typer.Option("--limit", "-n", help="显示多少个结果 (最多 50)")] = 10,
     sort: Annotated[str, typer.Option("--sort", help="排序: stars / forks / updated")] = "stars",
     language: Annotated[str, typer.Option("--language", "-L", help="限定语言, 如 python / go")] = "",
+    interactive: Annotated[bool, typer.Option(
+        "--interactive", "-i", help="交互式: 结果可上下键挑, 再 下载 / 概览 / 打开网页")] = False,
     download: Annotated[bool, typer.Option("--download", "-d", help="直接下载选中的仓库")] = False,
     dest: Annotated[str | None, typer.Option("--output", "-o", help="下载目标路径")] = None,
     depth: Annotated[int | None, typer.Option("--depth", help="克隆深度, 0 = 完整克隆")] = None,
     proxy: Annotated[str | None, typer.Option("--proxy", help="本次使用的加速源")] = None,
     no_proxy: Annotated[bool, typer.Option("--no-proxy", help="本次直连, 不走加速")] = False,
 ) -> None:
-    """搜索 GitHub 仓库 (走 API, 默认加速), [option]-d[/option] 可直接下载."""
+    """搜索 GitHub 仓库 (走 API, [info]默认加速[/info]); 不给关键词就是交互式搜索.
+
+    交互式搜索: 先问搜索词, 结果列出来后用 [key]↑↓[/key] 挑一个 (直接打字即筛选),
+    再选 [key]下载 / 看概览 / 打开网页[/key]; 挑完能接着挑下一个, 想换词就选"换个关键词再搜"。
+    [key]-d[/key] 是"挑一个直接下载"的快捷方式, 适合只想下载的场合。
+    """
     if sort not in hub.SEARCH_SORTS:
         console.error(f"不支持的排序: {sort} (可选: {', '.join(hub.SEARCH_SORTS)})")
     prefix = config.active_proxy(proxy, no_proxy)
+    if keyword is None or interactive:
+        _search_shell(keyword or "", prefix, limit=limit, sort=sort, language=language,
+                      dest=dest, depth=depth, proxy=proxy, no_proxy=no_proxy)
+        return
     items = hub.search(keyword, prefix, limit=limit, sort=sort, language=language)
     if not download or not items:
         return
     index = 0
     if len(items) > 1 and console.is_terminal():
-        labels = [f"{repo.get('full_name')}  ★{repo.get('stargazers_count')}  "
-                  f"{repo.get('description') or ''}"[:90] for repo in items]
-        picked = console.select("要下载哪个?", labels, instruction="[↑↓] 选择  [输入] 筛选  [回车] 确认")
+        picked = console.select("要下载哪个?", _result_labels(items),
+                                instruction="[↑↓] 选择  [输入] 筛选  [回车] 确认")
         if picked is None:
             console.warn("已取消下载")
             return
         index = picked
     repo_full = str(items[index].get("full_name") or "")
     _do_download(f"https://github.com/{repo_full}", dest, depth, "", proxy, no_proxy)
+
+
+# 交互式搜索结果里的动作: (代号, 说明) —— 单选列表, 顺序即重要性
+_SEARCH_ACTIONS: tuple[tuple[str, str], ...] = (
+    ("download", "下载到本地 (走加速)"),
+    ("stat", "看仓库概览 (star / 语言 / 贡献者 / 最新发布)"),
+    ("web", "打开仓库网页"),
+    ("again", "换个关键词再搜"),
+    ("quit", "退出搜索"),
+)
+
+
+def _result_labels(items: list[dict]) -> list[str]:
+    """搜索结果的一行摘要 (挑选器与 -d 共用): 仓库 / star / 简介."""
+    return [f"{repo.get('full_name')}  ★{repo.get('stargazers_count')}  "
+            f"{repo.get('description') or ''}"[:90] for repo in items]
+
+
+def _search_shell(keyword: str, prefix: str | None, *, limit: int, sort: str, language: str,
+                  dest: str | None, depth: int | None, proxy: str | None,
+                  no_proxy: bool) -> None:
+    """交互式搜索: 问关键词 -> 结果表 -> 挑一个 -> 下载 / 概览 / 网页, 可以一直搜下去.
+
+    一个回合只问一次关键词, 之后在结果列表里反复挑; 因此"搜了再搜"不必重敲命令行。
+    """
+    if not console.is_terminal():
+        console.error("交互式搜索需要交互终端\n提示: 直接给关键词, 如 gitx search \"cli 工具\"")
+    keyword = keyword.strip()
+    while True:
+        answer = console.text("搜索关键词" + (f" (当前: {language})" if language else ""),
+                              default=keyword, instruction="[回车] 用这个词  [Ctrl+C] 退出")
+        if answer is None:
+            console.warn("已退出交互式搜索")
+            return
+        keyword = answer.strip()
+        if not keyword:
+            console.warn("关键词不能为空")
+            continue
+        total, items = hub.query(keyword, prefix, limit=limit, sort=sort, language=language)
+        hub.render_results(total, items, keyword)
+        if not items:
+            continue
+        if not _search_round(items, prefix, dest=dest, depth=depth, proxy=proxy,
+                             no_proxy=no_proxy):
+            console.warn("已退出交互式搜索")
+            return
+
+
+def _search_round(items: list[dict], prefix: str | None, *, dest: str | None, depth: int | None,
+                  proxy: str | None, no_proxy: bool) -> bool:
+    """在结果里挑一个并执行动作; 返回 False = 退出搜索, True = 换个关键词再搜."""
+    labels = _result_labels(items)
+    while True:
+        index = console.select("挑一个仓库", labels,
+                               instruction="[↑↓] 选择  [输入] 筛选  [回车] 确认")
+        if index is None:
+            return False
+        repo = items[index]
+        full = str(repo.get("full_name") or "")
+        url = str(repo.get("html_url") or f"https://github.com/{full}")
+        choice = console.select(f"{full} 要做什么?", [label for _, label in _SEARCH_ACTIONS],
+                                instruction="[↑↓] 选择  [回车] 确认")
+        if choice is None:
+            return False
+        action = _SEARCH_ACTIONS[choice][0]
+        if action == "quit":
+            return False
+        if action == "again":
+            return True
+        if action == "download":
+            _do_download(url, dest, depth, "", proxy, no_proxy)
+        elif action == "stat":
+            hub.stat(full, prefix)
+        else:  # web: 打开浏览器 (webbrowser 较重, 只在真要打开时才导入)
+            import webbrowser
+
+            console.print(console.link(url, url))
+            if not webbrowser.open(url):
+                console.warn("未能自动打开浏览器, 请手动访问上面的链接")
 
 
 @app.command(rich_help_panel=PANEL_HUB)
@@ -1264,14 +1353,17 @@ def _repos_root(
     forks: Annotated[bool, typer.Option("--fork", help="只看复刻仓库")] = False,
     archived: Annotated[bool, typer.Option("--archived", help="只看已归档仓库")] = False,
     no_archived: Annotated[bool, typer.Option("--no-archived", help="排除已归档仓库")] = False,
+    search: Annotated[str, typer.Option(
+        "--search", "-q", help="按关键词搜 (搜得到全部仓库, 不受 -n 限制)")] = "",
 ) -> None:
     # 不带子命令 = 上下键挑仓库 -> 进仓库编辑界面
     _PICK.update(owner=owner, limit=limit, visibility=visibility, language=language, topic=topic,
-                 source=source, forks=forks, archived=archived, no_archived=no_archived)
+                 source=source, forks=forks, archived=archived, no_archived=no_archived,
+                 keyword=search)
     if ctx.invoked_subcommand is None:
         ghrepo.shell(owner=owner, limit=limit, visibility=visibility, language=language,
                      topic=topic, source=source, forks=forks, archived=archived,
-                     no_archived=no_archived)
+                     no_archived=no_archived, keyword=search)
 
 
 def _pick_target(target: str, what: str) -> str:
@@ -1291,10 +1383,16 @@ def repos_list(
     forks: Annotated[bool, typer.Option("--fork", help="只看复刻仓库")] = False,
     archived: Annotated[bool, typer.Option("--archived", help="只看已归档仓库")] = False,
     no_archived: Annotated[bool, typer.Option("--no-archived", help="排除已归档仓库")] = False,
+    search: Annotated[str, typer.Option(
+        "--search", "-q", help="按关键词搜 (搜得到全部仓库, 不受 -n 限制)")] = "",
 ) -> None:
-    """列出仓库: 仓库 / 描述 / 可见性 / star / 语言 / 更新 / 标记."""
+    """列出仓库: 仓库 / 描述 / 可见性 / star / 语言 / 更新 / 标记.
+
+    给 [key]-q[/key] 就是搜索 ([key]gitx repos list -q dotfiles[/key]), 否则按最近推送列前 [key]-n[/key] 个。
+    """
     ghrepo.list_repos(owner, limit=limit, visibility=visibility, language=language, topic=topic,
-                      source=source, forks=forks, archived=archived, no_archived=no_archived)
+                      source=source, forks=forks, archived=archived, no_archived=no_archived,
+                      keyword=search or str(_PICK.get("keyword") or ""))
 
 
 @repos_app.command("edit")

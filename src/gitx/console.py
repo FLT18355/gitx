@@ -108,6 +108,21 @@ def apply_palette(mode: str) -> None:
         target.push_theme(theme)
 
 
+def rebind() -> None:
+    """按**当前**的文件描述符重建控制台 —— 守护进程 fork 出的子进程必须调它.
+
+    rich 在 Console 构造时就把"是不是终端 / 多少列 / 支持几种颜色"定死了: 守护进程自己的
+    stdout/stderr 指向日志文件, 于是它导入时建出来的 Console 记住的是"没有终端 + 80 列 +
+    不带颜色"; fork 继承过来后**哪怕把 fd 换成客户端的终端**, rich 仍按老结论渲染 ——
+    表现就是颜色掉光、表格按 80 列折行。重建对象才能让它重新检测。
+    """
+    global console, err_console
+
+    console = Console(theme=THEME, highlight=False)
+    err_console = Console(theme=THEME, stderr=True, highlight=False)
+    apply_palette(_PALETTE)  # 保留当前配色, 并把主题推到新对象上
+
+
 def accent() -> str:
     """主强调色 (面板边框 / 选择器指针): 跟随当前配色."""
     return "bright_blue" if _PALETTE == "terminal" else MOCHA["blue"]

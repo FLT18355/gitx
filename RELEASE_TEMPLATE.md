@@ -1,94 +1,62 @@
-# gitx v1.0.6 发布说明
+# gitx v1.0.7 发布说明
 
-## 🚀 新增: 召唤守护进程 (低配机提速, 默认关闭)
-
-Python 每跑一条命令都要重新导入 typer / rich 那一大堆模块 (低配机上 1-2 秒, 占了短命令的大半耗时)。
-`daemon = true` 打开后, 运行**任意** gitx 命令时若发现后台没有守护进程, 就顺手拉起一个: 它先把这些
-模块导入好, 之后的命令把"参数 + 工作目录 + 环境变量 + 标准输入输出"交给它, 由它 **fork 一个已经
-预热的子进程**执行 —— 省掉重复导入, 而每条命令仍跑在自己的进程里 (状态不互相污染, Ctrl+C 只影响当次)。
-
-```bash
-gitx config set daemon true    # 打开 (之后第一条命令会自动召唤)
-gitx daemon                    # 看状态: 配置 / 进程 / 套接字 / 空闲退出 / 实际配色
-gitx daemon start|stop|restart
-```
-
-细节: 走 `~/.cache/gitx/daemon.sock` (Unix 域套接字, 不占端口、不监听网络); 空闲 300 秒自己退出,
-不留常驻进程; 升级后版本号变了会自动回退本地执行; 起不来或半路断掉都静默回退 —— 最坏只是没变快,
-功能不受影响 (原因见 `~/.cache/gitx/daemon.log`)。**默认关闭**, 不开启时行为与上一版完全一致。
-
-## 🎨 配色跟随终端 (`palette`)
-
-开了守护进程后 `palette = auto` 会**改用终端自己的 16 色调色板** (ANSI 名而不是 24 位 hex),
-低配终端不必为真彩色付渲染开销; 想固定就 `gitx config set palette mocha|terminal`。
-所有交互选择器、表格、提示符都跟着换, 只是颜色来源不同。
-
-## 💾 新增: 缓存 (`~/.cache/gitx`, 默认开)
-
-把可再生的网络结果记在 `~/.cache/gitx`, 少跑一趟网络也少用一次 API 限额: 目前记的是 GitHub API 的
-只读响应 (仓库概览 / 搜索 / 发布列表, 默认 5 分钟; `cache_ttl` 可调) 与远端默认分支探测 (1 小时)。
-写操作 (如发布发行版) 之后缓存自动作废。
-
-```bash
-gitx cache             # 缓存目录 + 占用 + 条目数
-gitx cache list        # 明细: 缓存键 / 写入时间 / 有效期 / 状态
-gitx cache prune       # 只清已过期的      gitx cache clear   # 全清
-```
-
-## ⚙️ 更多常用配置
-
-新增 8 项可直接改的配置 (都真的生效, 不是摆设):
-
-| 键 | 默认 | 作用 |
-| --- | --- | --- |
-| `daemon` | `false` | 召唤守护进程 |
-| `daemon_idle` | `300` | 守护进程空闲多少秒退出 |
-| `palette` | `auto` | 配色: `auto` / `terminal` / `mocha` |
-| `cache` | `true` | 启用 `~/.cache/gitx` 缓存 |
-| `cache_ttl` | `300` | 接口结果缓存秒数 (`0` = 不缓存) |
-| `remote` | `origin` | 默认远程名 (`info` / `url` / `web` / `push` 不带 `-r` 时用) |
-| `search_limit` | `10` | `gitx search` 默认条数 |
-| `repos_limit` | `30` | `gitx repos` 默认条数 |
-
-## 🔎 `gitx search`: 交互式搜索
-
-不给关键词 (或 `-i`) 就进交互界面: 问一次搜索词 -> 结果表 -> 上下键挑一个 ->
-**下载 / 看仓库概览 / 打开网页**; 挑完能接着挑, 想换词就选「换个关键词再搜」。
-
-## 🗂️ `gitx repos -q`: 仓库也能搜
-
-`-q/--search` 走 `gh search repos`, **搜得到全部** (不再受 `-n` 的"只取前几个"限制);
-挑选器底部也加了一条「用关键词搜全部仓库」。
+这一版只修 v1.0.6 守护进程的三个问题 (功能不变), 外加一条实测工具。
 
 ## 🐛 修复
 
-- **中文打不进选择器**: questionary 的"打字即筛选"只绑了 ASCII, 中文按键会被它自己的
-  "Disallow inserting other text" 丢弃 —— 「归档 / 下载 / 搜索」这类中文项其实筛不了。现在中文也能当筛选词。
-- **裸 `gitx` 欢迎页不再画表格**: 换成无边框对齐两列, 窄终端里说明折行缩进到命令列之后。
+- **开了守护进程后有些地方掉色 / 表格按 80 列折行** —— rich 在 `Console` 构造时就把
+  "是不是终端 / 多少列 / 支持几种颜色"定死了; 守护进程自己的 stdout/stderr 指向日志文件,
+  于是它建出来的控制台记住的是"没有终端 + 80 列 + 不带颜色", fork 出的子进程**哪怕换成你的
+  终端**也仍按这个旧结论渲染。现在子进程执行前会按当前 fd **重建控制台**, 颜色与终端宽度都正常;
+  配色仍按 `palette` 走 (`auto` = 开了守护进程就用终端自己的 16 色)。
 
-## 📚 文档
+- **`gitx daemon stop` 要等三分钟** —— `stop` / `restart` 自己也被路由进了守护进程, 而它单线程
+  收请求: 它正等着这个子进程结束, 子进程却在等它回 stop 的应答, 于是互相等成死锁。现在
+  **"管守护进程自己"的命令一律本地执行**, 并且改成**不导入 typer / rich 的快速通道** ——
+  `gitx daemon status` / `stop` 从约 2.3 秒降到 1 秒以内 (只剩 Python 启动);
+  socket 也加了 30 秒兜底超时, 任何情况下都不会再"卡住不退"。
 
-README 只留用户向内容; 实现要点 / 源码结构 / 开发约定移到 `doc/开发.md`, 发版步骤移到
-`doc/发布流程.md`, 并在显眼处写明"**按需读, 不要通读**"。
+- **开了守护进程感觉没什么效果** —— 三处一起补:
+  1. 第一条命令在召唤成功后**也走守护进程** (之前是"这条本地跑, 下条才快");
+  2. 预热清单连带 `prompt_toolkit` / `questionary` / `rich.progress`, 所以**选择器与进度条**
+     也不再重付导入 (交互命令原本要重付约 2 秒);
+  3. 新增 **`gitx daemon bench`**, 直接在你机器上量"有/没有守护进程"的差距 (各跑几轮取中位数)。
+
+## 🔧 新增
+
+```bash
+gitx daemon bench            # 实测这台机器的差距 (本机示例: 本地 1.9s -> 经守护进程 1.4s)
+gitx daemon bench -n 5       # 各跑 5 轮
+gitx daemon bench --cmd "repos list"   # 换成你要量的命令
+gitx daemon status           # 快速通道: 配置 / 进程 / 空闲退出 / 实际配色
+gitx daemon stop             # 立刻退出 (毫秒级)
+```
+
+## ⚙️ 配置提示
+
+- `palette = auto` (默认) 在**开了守护进程**时用终端自己的 16 色, 没开时用内置 Catppuccin 真彩。
+  如果你之前手动设过 `palette = mocha` 又觉得"颜色不对", 用下面这条回到跟随终端:
+
+  ```bash
+  gitx config set palette auto
+  ```
 
 ## 📦 安装/升级
 
 ```bash
-uv tool install gitx-1.0.6-py3-none-any.whl    # 方式 1: wheel (带 gitx upgrade 自更新)
-uv tool install .                              # 方式 2: 源码
-gitx upgrade                                   # 已经是 v1.0.5 及以后: 直接自更新
+gitx upgrade                                  # 已在 v1.0.5 及以后: 直接自更新
+uv tool install gitx-1.0.7-py3-none-any.whl    # 或装 wheel
+gitx daemon restart                            # 守护进程在用的话, 重启它以加载新代码
 
 # 验证
-gitx --version              # 应输出 gitx 1.0.6
-gitx daemon                 # 守护进程状态 (默认未开启)
-gitx config list            # 看新增的配置项
-gitx search                  # 交互式搜索 (需要终端)
+gitx --version        # 应输出 gitx 1.0.7
+gitx daemon bench     # 看这台机器上到底省了多少
 ```
 
 ## 🔗 相关
 
-- 源码: https://github.com/FLT18355/gitx/tree/v1.0.6
-- 完整变更: `git log v1.0.6-pre3..v1.0.6 --oneline`
+- 源码: https://github.com/FLT18355/gitx/tree/v1.0.7
+- 完整变更: `git log v1.0.6..v1.0.7 --oneline`
 
 ---
 

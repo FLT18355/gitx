@@ -1,6 +1,6 @@
 ---
 name: gitx
-version: 1.0.6
+version: 1.0.7
 description: 给中国人用的 GitHub 加速与同步工具 —— 下载 / 同步 / 加速 / 分支 / 暂存 / 标签 / 提交 / 改动 / 发行版 / Actions / 账号 / 我的仓库，一条命令搞定
 author: FLT18355
 repository: https://github.com/FLT18355/gitx
@@ -244,7 +244,8 @@ gitx sync                            # 同步当前仓库
 | `gitx cache clear [-y]` | 清空缓存（可再生产，下次自动重建） |
 | `gitx cache list [-a]` / `gitx cache prune` | 看缓存明细（缓存键 / 有效期 / 状态） / 只清已过期的 |
 | `gitx daemon [status]` | 守护进程状态：配置 / 进程 / 套接字 / 空闲退出 / 实际配色 |
-| `gitx daemon start\|stop\|restart` | 立刻召唤 / 停掉 / 重启（默认由命令自动召唤，无需手动） |
+| `gitx daemon start\|stop\|restart` | 立刻召唤 / 停掉 / 重启（默认由命令自动召唤，无需手动；走零依赖快速通道，毫秒级） |
+| `gitx daemon bench [-n 3] [--cmd "repos list"]` | 实测本机"有 / 没有守护进程"的启动耗时差距（中位数） |
 
 ### ⚡ 加速管理
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 
-__version__ = "1.0.6"  # 与 pyproject.toml 的 version 必须一致 (发版流程第 1 步)
+__version__ = "1.0.7"  # 与 pyproject.toml 的 version 必须一致 (发版流程第 1 步)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -24,20 +24,26 @@ def main(argv: list[str] | None = None) -> None:
     if code is None:
         from . import daemon
 
-        if daemon.enabled() and not daemon.in_daemon():
-            if daemon.running():
-                served = daemon.run(argv)
-                if served is not None:
-                    if served:
-                        raise SystemExit(served)
-                    return
-            else:
-                daemon.spawn()  # 顺手召唤: 这条命令之后, 后续命令就有预热进程可用
+        # `gitx daemon ...` 是管守护进程自己的命令, 必须本地跑: 交给守护进程执行会死锁
+        # (它单线程收请求, 正等着这个子进程结束, 子进程却在等它回 quit/停止的应答)。
+        if daemon.enabled() and not daemon.in_daemon() and not _manages_daemon(argv):
+            if not daemon.running():
+                daemon.spawn()  # 顺手召唤 (等它就绪; 起不来就静默跳过, 本地执行)
+            served = daemon.run(argv) if daemon.running() else None
+            if served is not None:
+                if served:
+                    raise SystemExit(served)
+                return
         from .cli import main as run_cli
 
         run_cli(argv)
     elif code:
         raise SystemExit(code)
+
+
+def _manages_daemon(argv: list[str]) -> bool:
+    """这条命令是不是在管守护进程自己 (gitx daemon ...)."""
+    return bool(argv) and argv[0] == "daemon"
 
 
 __all__ = ["__version__", "main"]

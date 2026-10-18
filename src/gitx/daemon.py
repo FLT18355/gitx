@@ -32,7 +32,8 @@ from typing import Any
 
 # 预热清单: 这些导入就是"启动慢"的来源, 守护进程先替命令行导好
 WARMUP = ("typer", "rich.console", "rich.table", "rich.text", "rich.markup", "rich.cells",
-          "rich.panel", "gitx.console", "gitx.config", "gitx.dispatch", "gitx.cli",
+          "rich.panel", "rich.progress", "rich.prompt", "prompt_toolkit", "questionary",
+          "gitx.console", "gitx.config", "gitx.dispatch", "gitx.cli",
           "gitx.hub", "gitx.ghrepo", "gitx.repo", "gitx.branch")
 
 _SOCK = socket.SOCK_STREAM
@@ -108,6 +109,99 @@ def _probe(path: Path, timeout: float = 0.05) -> bool:
 
 def running() -> bool:
     return _probe(socket_path())
+
+
+# ---------------------------------------------------------------- 控制命令 (快速通道)
+
+# `gitx daemon ...` 是"管守护进程自己"的命令, 必须本地跑 (交给守护进程执行会死锁: 它单线程
+# 收请求, 正等着这个子进程结束, 而子进程在等它回 stop 的应答)。既然跑在本地, 就别导入
+# typer / rich —— 控制命令该是秒回的。所以这里自己读配置、自己上色, 只依赖标准库。
+
+_RESET = "\033[0m"
+
+
+def _colors() -> bool:
+    """快速通道要不要上色 (看 NO_COLOR / FORCE_COLOR / 配置 color)."""
+    if os.environ.get("NO_COLOR"):
+        return False
+    if os.environ.get("FORCE_COLOR"):
+        return True
+    if not sys.stdout.isatty():
+        return False
+    return str(_fast_config("color", "auto")).lower() != "never"
+
+
+def _fast_config(key: str, default: Any) -> Any:
+    """直接读 config.toml, 不导入 config 模块 (它连带 rich, 而快速通道要避免的正是这个)."""
+    root = os.environ.get("XDG_CONFIG_HOME")
+    path = (Path(root) if root else Path.home() / ".config") / "gitx" / "config.toml"
+    with contextlib.suppress(OSError, ValueError, ImportError):
+        import tomllib
+
+        with open(path, "rb") as handle:
+            return tomllib.load(handle).get(key, default)
+    return default
+
+
+def _say(text: str, style: str = "") -> None:
+    """快速通道的打印 (style: ok / warn / info / dim)."""
+    codes = {"ok": "\033[1;32m", "warn": "\033[1;33m", "info": "\033[32m",
+             "step": "\033[36m", "dim": "\033[90m"}
+    prefix = {"ok": "[ok] ", "warn": "[!] ", "info": "[+] ", "step": "[*] "}.get(style, "")
+    if style and _colors():
+        print(f"{codes.get(style, '')}{prefix}{text}{_RESET}")
+    else:
+        print(f"{prefix}{text}")
+
+
+def control(argv: list[str]) -> int:
+    """`gitx daemon [status|start|stop|restart]`: 不导入 typer / rich 的快速通道."""
+    what = argv[0] if argv else "status"
+    if what in ("-h", "--help"):
+        print("用法: gitx daemon [status|start|stop|restart|bench]\n"
+              "  status   看配置与后台进程 (默认)\n"
+              "  start    立刻召唤一个守护进程 (之后命令由它执行)\n"
+              "  stop     让它退出 (不留常驻进程)\n"
+              "  restart  停掉再召唤 (升级后想立刻用新代码)\n"
+              "  bench    实测有/没有守护进程的启动耗时 (这个要用 typer, 会慢一点)")
+        return 0
+    if what == "stop":
+        if stop():
+            _say("守护进程已退出", "ok")
+        else:
+            _say("守护进程本来就没在跑", "info")
+        return 0
+    if what in ("start", "restart"):
+        if what == "restart" and stop():
+            _say("旧进程已退出, 正在重新召唤 ...", "info")
+        if running():
+            _say("守护进程已经在跑了", "info")
+            return 0
+        _say("召唤守护进程 ...", "step")
+        if spawn(force=True, wait=8.0):
+            _say(f"守护进程已就绪: {socket_path()}", "ok")
+            return 0
+        _say("守护进程没能启动 (原因见 ~/.cache/gitx/daemon.log)", "warn")
+        _say("不加守护进程也能用, 只是每条命令都要重付一次导入开销")
+        return 1
+    if what != "status":
+        _say(f"未知子命令: {what} (可用: status / start / stop / restart / bench)", "warn")
+        return 2
+    on = bool(_fast_config("daemon", False))
+    alive = running()
+    palette = str(_fast_config("palette", "auto"))
+    actual = "terminal" if (palette == "auto" and on) else ("mocha" if palette == "auto" else palette)
+    print(f"实例 {socket_path()}")
+    print(f"配置 daemon      : {'已开启' if on else '未开启 (gitx config set daemon true 打开)'}")
+    print(f"后台进程         : {'在跑' if alive else '没有在跑'}")
+    print(f"空闲退出         : {_idle_seconds()} 秒没命令就自己退出")
+    print(f"配色 palette     : {palette} -> 实际用 {actual}")
+    if on and not alive:
+        _say("下一条 gitx 命令会自动召唤它 (也可以 gitx daemon start 立刻召唤)", "info")
+    elif not on:
+        _say("开启后: 第一条命令顺手召唤预热进程, 之后的命令由它 fork 执行, 省掉重复导入",
+             "info")
+    return 0
 
 
 # ---------------------------------------------------------------- 启停
@@ -189,6 +283,7 @@ def _roundtrip(path: Path, payload: dict, fds: list[int] | None) -> dict:
     frame = struct.pack("!I", len(body)) + body
     sock = socket.socket(socket.AF_UNIX, _SOCK)
     try:
+        sock.settimeout(30)  # 兜底: 绝不允许"等三分钟还没退出"
         sock.connect(str(path))
         if fds:
             right = array.array("i", fds)
@@ -314,6 +409,11 @@ def _run_child(argv: list[str], cwd: str, fds: list[int], env: dict, on_start: A
             with contextlib.suppress(OSError):
                 if cwd and os.path.isdir(cwd):
                     os.chdir(cwd)
+            # fd 已经是客户端的终端了, 但 rich 的控制台还记着守护进程自己的"没有终端":
+            # 重建一次, 颜色与终端宽度才会对 (否则表现为掉色 + 按 80 列折行)
+            from . import console as console_module
+
+            console_module.rebind()
             sys.argv = ["gitx", *argv]
             _run_inprocess(argv)
             code = 0

@@ -2146,61 +2146,73 @@ def cache_clear(
 
 PANEL_DAEMON = "性能 (守护进程)"
 
-daemon_app = typer.Typer(help="召唤守护进程: 低配机上把启动开销摊到一次 (默认关闭)",
+daemon_app = typer.Typer(help="守护进程: 低配机上把启动开销摊到一次 (默认关闭)",
                          rich_markup_mode="rich", invoke_without_command=True,
                          context_settings={"help_option_names": ["-h", "--help"]})
 
 
 @daemon_app.callback()
 def _daemon_root(ctx: typer.Context) -> None:
-    # 不带子命令 = 看状态
+    # 不带子命令 = 看状态 (正常情况已被 dispatch 的快速通道接管, 这里只是兜底)
     if ctx.invoked_subcommand is None:
-        _daemon_status()
+        raise SystemExit(daemon.control(["status"]))
 
 
-@daemon_app.command("status")
-def daemon_status() -> None:
-    """看守护进程在不在、配置有没有开."""
-    _daemon_status()
+# status / start / stop / restart 走 dispatch 的零依赖快速通道 (见 daemon.control):
+# 这几条必须本地跑 (交给守护进程执行会死锁), 因此不导入 typer / rich, 保持在毫秒级。
+# 这里只放需要 typer 的两条: bench (实测耗时) 与 serve (内部前台运行)。
 
 
-@daemon_app.command("start")
-def daemon_start() -> None:
-    """立刻召唤一个守护进程 (不等某条命令来触发)."""
+@daemon_app.command("bench")
+def daemon_bench(
+    runs: Annotated[int, typer.Option("--runs", "-n", help="各跑几轮 (取中位数)")] = 3,
+    cmd: Annotated[str, typer.Option(
+        "--cmd", help="用哪条命令来量 (默认 config path; 别用 gitx daemon ... —— 它按设计不走守护进程)")] = "config path",
+) -> None:
+    """实测这台机器上"有守护进程 vs 没有"的启动耗时 (各跑几轮取中位数).
+
+    量的是同一条命令的两种走法: 本地执行 (环境里带 GITX_IN_DAEMON=1, 等价于没开守护进程)
+    与经守护进程执行。导入便宜 (快盘 + 热缓存) 的机器上差距小, 低配机 / 冷缓存 / 机械盘上差距大。
+    """
+    import os
+    import statistics
+    import subprocess
+    import time
+
+    argv = cmd.split()
+    count = max(1, runs)
+
+    def measure(routed: bool) -> float:
+        env = dict(os.environ)
+        if routed:
+            env.pop("GITX_IN_DAEMON", None)
+        else:
+            env["GITX_IN_DAEMON"] = "1"  # 入口看到它就只本地跑, 等于"没开守护进程"
+        times = []
+        for _ in range(count):
+            start = time.perf_counter()
+            subprocess.run([sys.executable, "-m", "gitx", *argv], env=env,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+            times.append(time.perf_counter() - start)
+        return statistics.median(times)
+
     if not daemon.enabled():
-        console.warn("配置里 daemon = false, 命令不会走守护进程\n"
+        console.warn("配置里 daemon = false: 「经守护进程」那一行不会真的走守护进程\n"
                      "提示: 开启用 gitx config set daemon true")
-    if daemon.running():
-        console.info("守护进程已经在跑了")
-        return
-    console.step("召唤守护进程 ...")
-    if daemon.spawn(force=True):
-        console.done(f"守护进程已就绪: {daemon.socket_path()}")
+    if not daemon.running():
+        daemon.spawn(force=True)
+    console.step(f"各跑 {count} 轮: gitx {' '.join(argv)}")
+    local, routed = measure(False), measure(True)
+    table = console.table("走法", "中位耗时", title="启动耗时实测")
+    table.add_row(console.txt("本地执行 (没守护进程)"), console.txt(f"{local * 1000:.0f} ms"))
+    table.add_row(console.txt("经守护进程"), console.txt(f"{routed * 1000:.0f} ms"))
+    console.print(table)
+    saved = local - routed
+    if saved > 0.02:
+        console.done(f"每次省约 {saved * 1000:.0f} ms")
     else:
-        console.error("守护进程没能启动 (可看 ~/.cache/gitx/daemon.log)\n"
-                      "提示: 不加守护进程也能用, 只是每条命令都要重付一次导入开销")
-
-
-@daemon_app.command("stop")
-def daemon_stop() -> None:
-    """让守护进程退出 (不留常驻进程)."""
-    if daemon.stop():
-        console.done("守护进程已退出")
-    else:
-        console.info("守护进程本来就没在跑")
-
-
-@daemon_app.command("restart")
-def daemon_restart() -> None:
-    """重启守护进程 (升级后想立刻用新代码时用)."""
-    if daemon.stop():
-        console.info("旧进程已退出, 正在重新召唤 ...")
-    else:
-        console.info("之前没有在跑, 直接召唤")
-    if daemon.spawn(force=True):
-        console.done(f"守护进程已重启: {daemon.socket_path()}")
-    else:
-        console.error("守护进程没能启动")
+        console.info("这台机器上导入本来就便宜 (快盘 / 热缓存), 省下的不多; "
+                     "低配机 / 冷缓存 / 机械盘上差距更大")
 
 
 @daemon_app.command("serve", hidden=True)
@@ -2209,23 +2221,6 @@ def daemon_serve() -> None:
     daemon.serve()
 
 
-def _daemon_status() -> None:
-    cfg = config.load()
-    on = bool(cfg.get("daemon"))
-    alive = daemon.running()
-    table = console.table("项", "状态", title="守护进程")
-    table.add_row(console.txt("配置 daemon"),
-                  console.txt("已开启" if on else "未开启 (gitx config set daemon true 打开)"))
-    table.add_row(console.txt("后台进程"), console.txt("在跑" if alive else "没有在跑"))
-    table.add_row(console.txt("套接字"), console.txt(str(daemon.socket_path())))
-    table.add_row(console.txt("空闲退出"), console.txt(f"{cfg.get('daemon_idle', 300)} 秒没命令就自己退出"))
-    table.add_row(console.txt("配色 (palette)"),
-                  console.txt(f"{cfg.get('palette', 'auto')} -> 实际用 {config.palette_mode()}"))
-    console.print(table)
-    if on and not alive:
-        console.info("下一条 gitx 命令会自动召唤它 (也可以 gitx daemon start 立刻召唤)")
-    if not on:
-        console.info("开启后: 第一条命令顺手召唤预热进程, 之后的命令由它 fork 执行, 省掉重复导入")
 
 
 app.add_typer(cache_app, name="cache", rich_help_panel=PANEL_CONF)

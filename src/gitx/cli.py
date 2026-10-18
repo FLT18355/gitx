@@ -23,7 +23,7 @@ from typing import Annotated
 import typer
 from rich.markup import escape
 
-from . import (__version__, accel, actions, auth, branch, cache, config, console, download, ghrepo,
+from . import (__version__, accel, actions, auth, branch, cache, config, console, daemon, download, ghrepo,
                gitcmd, github, hub, pr, publish, release, remote, repo, stash, submodule, sync, tag,
                upgrade)
 
@@ -123,6 +123,8 @@ _WELCOME_TIPS: tuple[tuple[str, str], ...] = (
     ("gitx actions", "Actions 运行: 列表 / 日志 / 重跑 / 产物下载 (交给 gh)"),
     ("gitx auth", "登录状态 / 切换账号 / 取令牌 (--save 提升 API 限额)"),
     ("gitx repos", "挑/搜我的仓库 (-q 关键词) -> 进编辑界面改设置"),
+    ("gitx daemon", "守护进程: 低配机提速 (config set daemon true 打开)"),
+    ("gitx cache", "缓存: 查看 / 明细 / 清理 ~/.cache/gitx"),
     ("gitx upgrade", "自更新到最新版本 (下载走加速)"),
     ("gitx -h", "查看全部命令与选项"),
 )
@@ -368,8 +370,8 @@ def tidy(
 @app.command(rich_help_panel=PANEL_REPO)
 def url(
     transport: Annotated[str | None, typer.Argument(
-        metavar="[accel|https|ssh]", help="切换 origin 地址形态, 缺省则查看")] = None,
-    remote: Annotated[str, typer.Option("--remote", "-r", help="远程名")] = "origin",
+        metavar="[accel|https|ssh]", help="切换远程地址形态, 缺省则查看")] = None,
+    remote: Annotated[str, typer.Option("--remote", "-r", help="远程名 (缺省用配置 remote)")] = "",
     path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
 ) -> None:
     """查看或切换远端地址: accel (拉取加速, 推送直连) / https / ssh."""
@@ -625,11 +627,11 @@ def tag_delete(
 @tag_app.command("push")
 def tag_push(
     names: Annotated[list[str] | None, typer.Argument(metavar="[标签...]", help="缺省推送全部标签")] = None,
-    remote: Annotated[str, typer.Option("--remote", "-r", help="远程名")] = "origin",
+    remote: Annotated[str, typer.Option("--remote", "-r", help="远程名 (缺省用配置 remote)")] = "",
     path: Annotated[str, typer.Option("--path", "-C", help="仓库路径")] = ".",
 ) -> None:
     """推送标签到远端 (推送直连)."""
-    tag.push(list(names or ()), remote=remote, path=path)
+    tag.push(list(names or ()), remote=remote or config.default_remote(), path=path)
 
 
 app.add_typer(tag_app, name="tag", rich_help_panel=PANEL_WIP)
@@ -691,7 +693,8 @@ def clean(
 def search(
     keyword: Annotated[str | None, typer.Argument(
         metavar="[关键词]", help="搜索词, 如 'cli 工具'; 留空 = 交互式搜索")] = None,
-    limit: Annotated[int, typer.Option("--limit", "-n", help="显示多少个结果 (最多 50)")] = 10,
+    limit: Annotated[int | None, typer.Option(
+        "--limit", "-n", help="显示多少个结果 (最多 50; 缺省用配置 search_limit)")] = None,
     sort: Annotated[str, typer.Option("--sort", help="排序: stars / forks / updated")] = "stars",
     language: Annotated[str, typer.Option("--language", "-L", help="限定语言, 如 python / go")] = "",
     interactive: Annotated[bool, typer.Option(
@@ -710,6 +713,7 @@ def search(
     """
     if sort not in hub.SEARCH_SORTS:
         console.error(f"不支持的排序: {sort} (可选: {', '.join(hub.SEARCH_SORTS)})")
+    limit = limit or config.default_limit("search_limit", 10)
     prefix = config.active_proxy(proxy, no_proxy)
     if keyword is None or interactive:
         _search_shell(keyword or "", prefix, limit=limit, sort=sort, language=language,
@@ -1343,7 +1347,8 @@ _PICK: dict[str, object] = {}
 def _repos_root(
     ctx: typer.Context,
     limit: Annotated[int, typer.Option(
-        "--limit", "-n", help="一次取几个仓库来挑 (默认 30; 只想看前几个就给个小数字)")] = 30,
+        "--limit", "-n",
+        help="一次取几个仓库来挑 (缺省用配置 repos_limit; 只想看前几个给小数字)")] = None,
     owner: Annotated[str, typer.Option("--owner", "-o", help="看谁的仓库 (默认当前登录账号)")] = "",
     visibility: Annotated[str, typer.Option("--visibility",
                                             help="按可见性过滤: public / private / internal")] = "",
@@ -1356,6 +1361,7 @@ def _repos_root(
     search: Annotated[str, typer.Option(
         "--search", "-q", help="按关键词搜 (搜得到全部仓库, 不受 -n 限制)")] = "",
 ) -> None:
+    limit = limit or config.default_limit("repos_limit", 30)
     # 不带子命令 = 上下键挑仓库 -> 进仓库编辑界面
     _PICK.update(owner=owner, limit=limit, visibility=visibility, language=language, topic=topic,
                  source=source, forks=forks, archived=archived, no_archived=no_archived,
@@ -1373,7 +1379,8 @@ def _pick_target(target: str, what: str) -> str:
 
 @repos_app.command("list")
 def repos_list(
-    limit: Annotated[int, typer.Option("--limit", "-n", help="列几个 (默认 30)")] = 30,
+    limit: Annotated[int | None, typer.Option(
+        "--limit", "-n", help="列几个 (缺省用配置 repos_limit)")] = None,
     owner: Annotated[str, typer.Option("--owner", "-o", help="看谁的仓库 (默认当前登录账号)")] = "",
     visibility: Annotated[str, typer.Option("--visibility",
                                             help="按可见性过滤: public / private / internal")] = "",
@@ -1390,6 +1397,7 @@ def repos_list(
 
     给 [key]-q[/key] 就是搜索 ([key]gitx repos list -q dotfiles[/key]), 否则按最近推送列前 [key]-n[/key] 个。
     """
+    limit = limit or config.default_limit("repos_limit", 30)
     ghrepo.list_repos(owner, limit=limit, visibility=visibility, language=language, topic=topic,
                       source=source, forks=forks, archived=archived, no_archived=no_archived,
                       keyword=search or str(_PICK.get("keyword") or ""))
@@ -2108,8 +2116,22 @@ def _cache_root(ctx: typer.Context) -> None:
 
 @cache_app.command("info")
 def cache_info() -> None:
-    """查看缓存目录与占用."""
+    """查看缓存目录与占用 (整文件 + 键值缓存)."""
     cache.info()
+
+
+@cache_app.command("list")
+def cache_list(
+    all_: Annotated[bool, typer.Option("--all", "-a", help="连已过期的也列出来")] = False,
+) -> None:
+    """列出缓存明细: 缓存键 / 写入时间 / 有效期 / 状态."""
+    cache.list_entries(all_=all_)
+
+
+@cache_app.command("prune")
+def cache_prune() -> None:
+    """只清掉已过期的缓存 (留着的都还在有效期内)."""
+    cache.prune()
 
 
 @cache_app.command("clear")
@@ -2120,7 +2142,89 @@ def cache_clear(
     cache.clear(yes=yes)
 
 
+# ================================================================ 守护进程
+
+PANEL_DAEMON = "性能 (守护进程)"
+
+daemon_app = typer.Typer(help="守护进程: 低配机上把启动开销摊到一次 (默认关闭)",
+                         rich_markup_mode="rich", invoke_without_command=True,
+                         context_settings={"help_option_names": ["-h", "--help"]})
+
+
+@daemon_app.callback()
+def _daemon_root(ctx: typer.Context) -> None:
+    # 不带子命令 = 看状态 (正常情况已被 dispatch 的快速通道接管, 这里只是兜底)
+    if ctx.invoked_subcommand is None:
+        raise SystemExit(daemon.control(["status"]))
+
+
+# status / start / stop / restart 走 dispatch 的零依赖快速通道 (见 daemon.control):
+# 这几条必须本地跑 (交给守护进程执行会死锁), 因此不导入 typer / rich, 保持在毫秒级。
+# 这里只放需要 typer 的两条: bench (实测耗时) 与 serve (内部前台运行)。
+
+
+@daemon_app.command("bench")
+def daemon_bench(
+    runs: Annotated[int, typer.Option("--runs", "-n", help="各跑几轮 (取中位数)")] = 3,
+    cmd: Annotated[str, typer.Option(
+        "--cmd", help="用哪条命令来量 (默认 config path; 别用 gitx daemon ... —— 它按设计不走守护进程)")] = "config path",
+) -> None:
+    """实测这台机器上"有守护进程 vs 没有"的启动耗时 (各跑几轮取中位数).
+
+    量的是同一条命令的两种走法: 本地执行 (环境里带 GITX_IN_DAEMON=1, 等价于没开守护进程)
+    与经守护进程执行。导入便宜 (快盘 + 热缓存) 的机器上差距小, 低配机 / 冷缓存 / 机械盘上差距大。
+    """
+    import os
+    import statistics
+    import subprocess
+    import time
+
+    argv = cmd.split()
+    count = max(1, runs)
+
+    def measure(routed: bool) -> float:
+        env = dict(os.environ)
+        if routed:
+            env.pop("GITX_IN_DAEMON", None)
+        else:
+            env["GITX_IN_DAEMON"] = "1"  # 入口看到它就只本地跑, 等于"没开守护进程"
+        times = []
+        for _ in range(count):
+            start = time.perf_counter()
+            subprocess.run([sys.executable, "-m", "gitx", *argv], env=env,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+            times.append(time.perf_counter() - start)
+        return statistics.median(times)
+
+    if not daemon.enabled():
+        console.warn("配置里 daemon = false: 「经守护进程」那一行不会真的走守护进程\n"
+                     "提示: 开启用 gitx config set daemon true")
+    if not daemon.running():
+        daemon.spawn(force=True)
+    console.step(f"各跑 {count} 轮: gitx {' '.join(argv)}")
+    local, routed = measure(False), measure(True)
+    table = console.table("走法", "中位耗时", title="启动耗时实测")
+    table.add_row(console.txt("本地执行 (没守护进程)"), console.txt(f"{local * 1000:.0f} ms"))
+    table.add_row(console.txt("经守护进程"), console.txt(f"{routed * 1000:.0f} ms"))
+    console.print(table)
+    saved = local - routed
+    if saved > 0.02:
+        console.done(f"每次省约 {saved * 1000:.0f} ms")
+    else:
+        console.info("这台机器上导入本来就便宜 (快盘 / 热缓存), 省下的不多; "
+                     "低配机 / 冷缓存 / 机械盘上差距更大")
+
+
+@daemon_app.command("serve", hidden=True)
+def daemon_serve() -> None:
+    """(内部) 前台运行守护进程 —— 由 gitx 自己在后台调用."""
+    daemon.serve()
+
+
+
+
 app.add_typer(cache_app, name="cache", rich_help_panel=PANEL_CONF)
+app.add_typer(daemon_app, name="daemon", rich_help_panel=PANEL_DAEMON)
 
 
 @app.command("upgrade", rich_help_panel=PANEL_CONF)
@@ -2307,7 +2411,9 @@ def _do_download(url: str, dest: str | None, depth: int | None, branch: str,
 
 def main(argv: list[str] | None = None) -> None:
     """typer 应用入口 (git 透传 / --version 的快速通道见 dispatch.handle)."""
-    console.apply_color(str(config.load().get("color", "auto")))
+    cfg = config.load()
+    console.apply_color(str(cfg.get("color", "auto")))
+    console.apply_palette(config.palette_mode())  # 守护进程模式下换成终端自己的配色
     app(list(sys.argv[1:] if argv is None else argv))
 
 

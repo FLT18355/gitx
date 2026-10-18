@@ -88,7 +88,7 @@ def web(path: str = ".", what: str = "", *, browse: bool = True) -> str:
     """拼出当前仓库的 GitHub 页面并打开浏览器; 返回 URL."""
     if not gitcmd.is_repo(path):
         console.error(f"{path} 不是 git 仓库")
-    parsed = github.owner_repo(gitcmd.remote_url("origin", path))
+    parsed = github.owner_repo(gitcmd.remote_url(config.default_remote(), path))
     if not parsed:
         console.error("origin 不是 GitHub 地址 (可先: gitx push to <仓库地址>)")
     owner, repo = parsed
@@ -210,7 +210,7 @@ def resolve_target(target: str) -> tuple[str, str]:
     if not arg:
         if not gitcmd.is_repo("."):
             console.error("当前目录不是 git 仓库\n用法: gitx stat <owner/repo|链接>")
-        parsed = github.owner_repo(gitcmd.remote_url("origin"))
+        parsed = github.owner_repo(gitcmd.remote_url(config.default_remote()))
         if not parsed:
             console.error("origin 不是 GitHub 地址 (可先: gitx push to <仓库地址>)")
         return parsed

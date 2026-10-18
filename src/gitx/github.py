@@ -128,14 +128,25 @@ def api_token() -> str:
     return _TOKEN
 
 
-def _request(url: str, prefix: str | None, *, timeout: int, quiet: bool) -> tuple[object, dict]:
+def _request(url: str, prefix: str | None, *, timeout: int, quiet: bool,
+             cache_ttl: int | None = None) -> tuple[object, dict]:
     """请求 GitHub REST API (走加速) -> (JSON, 响应头); 失败返回 (None, {}).
 
     quiet=False 时打印失败原因并以退出码 1 结束进程 (主线数据用);
     quiet=True 时静默返回 None (可选信息用, 如"最新发布"对无发布的仓库会 404)。
+    cache_ttl 给定时走 ~/.cache/gitx (默认取配置 cache_ttl): 同一地址在 TTL 内只抓一次 ——
+    国内直连 api.github.com 一趟要几秒, 匿名限额又只有 60 次/小时, 所以只读 GET 值得记下来。
     """
     import urllib.error  # 仅网络命令需要, 避免拖慢其它命令的启动
     import urllib.request
+
+    from . import cache  # 只有真发请求时才需要 (cache 依赖 config, 延迟导入避免循环)
+
+    key = f"api:{url}"
+    if cache_ttl != 0:
+        hit = cache.get(key, ttl_seconds=cache_ttl)
+        if hit is not None:
+            return hit, {}  # 命中就静默用 (想看有什么: gitx cache list)
 
     req = urllib.request.Request(accel.wrap(url, prefix), headers=dict(HEADERS))
     token = api_token()
@@ -144,7 +155,10 @@ def _request(url: str, prefix: str | None, *, timeout: int, quiet: bool) -> tupl
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             headers = {k.lower(): v for k, v in resp.headers.items()}
-            return json.loads(resp.read().decode("utf-8")), headers
+            data = json.loads(resp.read().decode("utf-8"))
+            if cache_ttl != 0:
+                cache.put(key, data, ttl_seconds=cache_ttl)
+            return data, headers
     except urllib.error.HTTPError as exc:
         if quiet:
             return None, {}
@@ -172,9 +186,13 @@ def api_try(url: str, prefix: str | None = None, *, timeout: int = 30) -> object
 
 
 def api_count(url: str, prefix: str | None = None, *, timeout: int = 30) -> int:
-    """分页接口的总条目数 (如贡献者): 借 Link 头得到总数; 失败返回 -1."""
+    """分页接口的总条目数 (如贡献者): 借 Link 头得到总数; 失败返回 -1.
+
+    刻意不吃缓存: 总数是从响应头 (Link) 里读出来的, 缓存命中时不带响应头。
+    """
     sep = "&" if "?" in url else "?"
-    data, headers = _request(f"{url}{sep}per_page=1", prefix, timeout=timeout, quiet=True)
+    data, headers = _request(f"{url}{sep}per_page=1", prefix, timeout=timeout, quiet=True,
+                             cache_ttl=0)
     if not isinstance(data, list):
         return -1
     m = re.search(r'[?&]page=(\d+)>;\s*rel="last"', headers.get("link", ""))

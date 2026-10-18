@@ -1,6 +1,6 @@
 ---
 name: gitx
-version: 1.0.6-pre3
+version: 1.0.8
 description: 给中国人用的 GitHub 加速与同步工具 —— 下载 / 同步 / 加速 / 分支 / 暂存 / 标签 / 提交 / 改动 / 发行版 / Actions / 账号 / 我的仓库，一条命令搞定
 author: FLT18355
 repository: https://github.com/FLT18355/gitx
@@ -46,6 +46,8 @@ gitx sync                            # 同步当前仓库
 | 🔍 **交互选择** | questionary 上下键选择，打字筛选 |
 | ⚡ **git 透传** | `gitx status` 等同原生 git，瞬时响应 |
 | 💾 **断点续传** | 中断后重跑自动续传，不浪费流量 |
+| ⚡ **召唤守护进程** | `daemon = true`（默认关）：预热进程 + fork 执行，省掉每次重付的导入开销；`palette` 顺带改用终端配色 |
+| 🗃️ **缓存** | 只读 API 响应 / 默认分支探测记在 `~/.cache/gitx`（`cache_ttl` 默认 300 秒），写操作后自动作废 |
 | 🌲 **部分克隆** | 文件夹下载快 8 倍（稀疏检出） |
 | 🔁 **协作一条龙** | remote / submodule / pr 全部加速 |
 | 🏷️ **发行版管理** | `gitx publish` 创建 / 上传附件 / 编辑 / 删除（交给已登录的 gh） |
@@ -240,6 +242,10 @@ gitx sync                            # 同步当前仓库
 | `gitx pr create [-t 标题 -b 正文] [--fill] [--draft]` | 创建 PR（依赖已登录的 gh CLI） |
 | `gitx cache [info]` | 查看缓存占用（`~/.cache/gitx`） |
 | `gitx cache clear [-y]` | 清空缓存（可再生产，下次自动重建） |
+| `gitx cache list [-a]` / `gitx cache prune` | 看缓存明细（缓存键 / 有效期 / 状态） / 只清已过期的 |
+| `gitx daemon [status]` | 守护进程状态：配置 / 进程 / 套接字 / 空闲退出 / 实际配色 |
+| `gitx daemon start\|stop\|restart` | 立刻召唤 / 停掉 / 重启（默认由命令自动召唤，无需手动；走零依赖快速通道，毫秒级） |
+| `gitx daemon bench [-n 3] [--cmd "repos list"]` | 实测本机"有 / 没有守护进程"的启动耗时差距（中位数） |
 
 ### ⚡ 加速管理
 
@@ -421,6 +427,14 @@ GITX_RELEASE_PROXY=off|v6|v4|gh-proxy|...
 | `message` | `"日常同步更新"` | push 默认提交信息 |
 | `sync_rebase` | `true` | `gitx sync` 用变基（`false` = 合并） |
 | `token` | 空 | GitHub API token（限额 60 → 5000 次/小时；`gitx auth token --save` 一键写入） |
+| `cache` | `true` | 把可再生的结果记到 `~/.cache/gitx`（接口响应 / 默认分支 / 版本查询） |
+| `cache_ttl` | `300` | 接口结果的缓存秒数（`0` = 不缓存） |
+| `daemon` | `false` | **召唤守护进程**：开启后运行任意 gitx 命令会自动拉起预热进程，后续命令由它 fork 执行 |
+| `daemon_idle` | `300` | 守护进程空闲多少秒后自己退出 |
+| `palette` | `auto` | 配色：`auto`（开了守护进程就用终端配色）/ `terminal` / `mocha` |
+| `remote` | `origin` | 默认远程名（`info` / `url` / `web` / `push` 等不带 `-r` 时用） |
+| `search_limit` | `10` | `gitx search` 不带 `-n` 时的条数 |
+| `repos_limit` | `30` | `gitx repos` / `repos list` 不带 `-n` 时的条数 |
 | `color` | `auto` | 彩色输出开关 |
 | `assume_yes` | `false` | 跳过所有确认（相当于全局 `-y`） |
 

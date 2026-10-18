@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import sys
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, NoReturn
@@ -57,9 +58,74 @@ THEME = Theme({
     "border": MOCHA["surface1"],
 })
 
+# 同样的语义名 -> 终端自己的 16 色调色板 (不带 hex): 颜色由用户终端主题决定。
+# 低配终端 / 追求"和其他命令行工具一个色系"时用它 (gitx config set palette terminal)。
+TERMINAL_THEME = Theme({
+    "info": "green",
+    "step": "cyan",
+    "warn": "yellow",
+    "err": "bold red",
+    "ok": "bold green",
+    "key": "bold blue",
+    "num": "bold yellow",
+    "option": "yellow",
+    "dim": "bright_black",
+    "title": "bold magenta",
+    "hash": "yellow",
+    "graph": "green",
+    "branch": "bold cyan",
+    "tag": "magenta",
+    "head": "bold magenta",
+    "date": "bright_black",
+    "border": "bright_black",
+})
+
+# 当前配色 (mocha = 内置真彩色, terminal = 终端调色板); 供面板边框 / 选择器取色
+_PALETTE = "mocha"
+
 # 提示符: [+] 信息  [*] 进行中  [ok] 完成  [!] 警告  [-] 错误  [?] 询问
 console = Console(theme=THEME, highlight=False)
 err_console = Console(theme=THEME, stderr=True, highlight=False)
+
+
+def apply_palette(mode: str) -> None:
+    """切换配色: mocha = 内置 Catppuccin 真彩色, terminal = 用终端自己的调色板.
+
+    只推一次 (每进程只会调用一次): 推过的主题会盖住构造时的 THEME, 语义名不变,
+    因此所有调用点一行都不用改。
+    """
+    global _PALETTE
+
+    if mode == "terminal":
+        _PALETTE = "terminal"
+        theme = TERMINAL_THEME
+    else:
+        _PALETTE = "mocha"
+        theme = THEME
+    for target in (console, err_console):
+        with contextlib.suppress(Exception):  # 老的 stack 空时 pop 会报错, 无妨
+            target.pop_theme()
+        target.push_theme(theme)
+
+
+def rebind() -> None:
+    """按**当前**的文件描述符重建控制台 —— 守护进程 fork 出的子进程必须调它.
+
+    rich 在 Console 构造时就把"是不是终端 / 多少列 / 支持几种颜色"定死了: 守护进程自己的
+    stdout/stderr 指向日志文件, 于是它导入时建出来的 Console 记住的是"没有终端 + 80 列 +
+    不带颜色"; fork 继承过来后**哪怕把 fd 换成客户端的终端**, rich 仍按老结论渲染 ——
+    表现就是颜色掉光、表格按 80 列折行。重建对象才能让它重新检测。
+    """
+    global console, err_console
+
+    console = Console(theme=THEME, highlight=False)
+    err_console = Console(theme=THEME, stderr=True, highlight=False)
+    apply_palette(_PALETTE)  # 保留当前配色, 并把主题推到新对象上
+
+
+def accent() -> str:
+    """主强调色 (面板边框 / 选择器指针): 跟随当前配色."""
+    return "bright_blue" if _PALETTE == "terminal" else MOCHA["blue"]
 
 
 
@@ -123,9 +189,9 @@ def error(message: Any, code: int = 1) -> NoReturn:
     raise SystemExit(code)
 
 
-def panel(body: Any, title: str = "", border: str = MOCHA["blue"]) -> None:
+def panel(body: Any, title: str = "", border: str = "") -> None:
     console.print(Panel(body, title=f"[key]{escape(title)}[/key]" if title else None,
-                        border_style=border, expand=False))
+                        border_style=border or accent(), expand=False))
 
 
 def table(*columns: str, title: str = "") -> Table:
@@ -217,7 +283,29 @@ PICKER_STYLE = (
     ("separator", f"fg:{MOCHA['overlay1']}"),
     ("disabled", f"fg:{MOCHA['overlay0']} italic"),
 )
+
+# 终端配色版: 用 prompt_toolkit 认的颜色名 (ansixxx / default), 颜色交给终端主题。
+# 注意命名与 rich 不同 —— rich 的 bright_black 在这里叫 ansibrightblack, 写错了会直接抛
+# "Wrong color format" (questionary 建 Style 时就会炸)。
+PICKER_STYLE_TERMINAL = (
+    ("qmark", "fg:ansimagenta bold"),
+    ("question", "fg:default bold"),
+    ("pointer", "fg:ansimagenta bold"),
+    ("highlighted", "fg:ansimagenta bold"),
+    ("selected", "fg:ansigreen"),
+    ("answer", "fg:ansiblue bold"),
+    ("instruction", "fg:ansibrightblack"),
+    ("search_success", "fg:ansigreen"),
+    ("search_none", "fg:ansired italic"),
+    ("separator", "fg:ansibrightblack"),
+    ("disabled", "fg:ansibrightblack italic"),
+)
 MAX_VISIBLE = 5  # 交互列表最多同时渲染几行, 超出的部分靠上下键滚动
+
+
+def picker_style() -> tuple[tuple[str, str], ...]:
+    """选择器的配色 (跟随当前 palette, 见 apply_palette)."""
+    return PICKER_STYLE_TERMINAL if _PALETTE == "terminal" else PICKER_STYLE
 
 
 def _any_char_bindings(control: Any) -> Any:
@@ -262,7 +350,7 @@ def _picker(multi: bool, message: str, labels: Sequence[str], instruction: str,
                                     checked=bool(flags[i]) if i < len(flags) else False)
                  for i, label in enumerate(labels)],
         instruction=instruction or None,
-        style=questionary.Style(PICKER_STYLE),
+        style=questionary.Style(picker_style()),
         use_search_filter=True,
         use_jk_keys=False,  # 搜索优先: j/k 让位给筛选输入
     )
@@ -298,7 +386,7 @@ def text(message: str, *, default: str = "", instruction: str = "") -> str | Non
     import questionary
 
     return questionary.text(message, default=default, instruction=instruction or None,
-                            style=questionary.Style(PICKER_STYLE)).ask()
+                            style=questionary.Style(picker_style())).ask()
 
 
 def progress() -> Progress:

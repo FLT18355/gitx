@@ -160,18 +160,19 @@ def delete(names: list[str], *, force: bool = False, remote: bool = False,
         console.error("用法: gitx branch delete <分支...> [--force] [--remote]")
 
     if remote:
-        if not gitcmd.remote_url("origin", path):
-            console.error("没有 origin 远程 (gitx push to <仓库地址> 关联)")
+        rname = config.default_remote()
+        if not gitcmd.remote_url(rname, path):
+            console.error(f"没有 {rname} 远程 (gitx push to <仓库地址> 关联)")
         prefix = config.active_proxy()
         for name in names:
-            if not gitcmd.remote_branch_exists("origin", name, path, prefix):
-                console.warn(f"远端没有分支: origin/{name}")
+            if not gitcmd.remote_branch_exists(rname, name, path, prefix):
+                console.warn(f"远端没有分支: {rname}/{name}")
                 continue
-            console.step(f"删除远端分支 origin/{name}...")
-            rc, out = gitcmd.delete_remote_ref(path, "origin", f"refs/heads/{name}")
+            console.step(f"删除远端分支 {rname}/{name}...")
+            rc, out = gitcmd.delete_remote_ref(path, rname, f"refs/heads/{name}")
             if rc != 0:
-                console.error(f"删除失败: origin/{name} (受保护分支或网络问题)\n{out}")
-            console.done(f"已删除远端分支: origin/{name}")
+                console.error(f"删除失败: {rname}/{name} (受保护分支或网络问题)\n{out}")
+            console.done(f"已删除远端分支: {rname}/{name}")
         return
 
     current = gitcmd.current_branch(path)

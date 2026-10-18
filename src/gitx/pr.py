@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import subprocess
 
-from . import console, ghcli, gitcmd, github
+from . import config, console, ghcli, gitcmd, github
 
 STATES = ("open", "closed", "all")
 
@@ -22,7 +22,7 @@ def _resolve(target: str, path: str = ".") -> tuple[str, str]:
         if parsed:
             return parsed
         console.error(f"无法识别仓库: {target} (形如 owner/repo)")
-    parsed = github.owner_repo(gitcmd.remote_url("origin", path))
+    parsed = github.owner_repo(gitcmd.remote_url(config.default_remote(), path))
     if not parsed:
         console.error("当前仓库没有 GitHub origin\n提示: 用 gitx pr list owner/repo, 或在仓库目录里运行")
     return parsed

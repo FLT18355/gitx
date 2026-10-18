@@ -31,7 +31,7 @@ SUBCOMMANDS = frozenset({
     "stash", "tag", "commit", "diff", "discard", "clean",
     "search", "stat", "web", "ignore",
     "proxy", "config", "doctor", "git",
-    "remote", "submodule", "pr", "cache", "upgrade", "actions", "auth", "repos",
+    "remote", "submodule", "pr", "cache", "upgrade", "actions", "auth", "daemon", "repos",
 })
 
 # 只接管自家子命令的命令: 其余参数 (gitx remote -v / gitx submodule foreach) 仍透传 git
@@ -83,6 +83,14 @@ def handle(argv: list[str]) -> tuple[int | None, list[str]]:
         sub = argv[1] if len(argv) > 1 else ""
         if sub and sub not in own and sub not in ("-h", "--help"):
             return _run_git(argv), argv  # 未知子命令/选项: 交回 git, 如 gitx remote -v
+        return None, argv
+    if first == "daemon":
+        # 控制守护进程自己的命令: 不加载 typer (秒回), 只有 bench / serve 才交给 typer
+        from . import daemon
+
+        sub = argv[1] if len(argv) > 1 else ""
+        if sub in ("", "status", "start", "stop", "restart", "-h", "--help"):
+            return daemon.control(argv[1:]), argv
         return None, argv
     if first in SUBCOMMANDS:
         return None, argv

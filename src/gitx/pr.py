@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import subprocess
 
-from . import console, ghcli, gitcmd, github
+from . import config, console, ghcli, gitcmd, github
 
 STATES = ("open", "closed", "all")
 

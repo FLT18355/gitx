@@ -1,6 +1,6 @@
 ---
 name: gitx
-version: 1.0.7
+version: 1.0.8
 description: 给中国人用的 GitHub 加速与同步工具 —— 下载 / 同步 / 加速 / 分支 / 暂存 / 标签 / 提交 / 改动 / 发行版 / Actions / 账号 / 我的仓库，一条命令搞定
 author: FLT18355
 repository: https://github.com/FLT18355/gitx

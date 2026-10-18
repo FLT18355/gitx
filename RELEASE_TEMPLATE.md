@@ -1,6 +1,6 @@
-# gitx v1.0.7 发布说明
+# gitx v1.0.8 发布说明
 
-这一版只修 v1.0.6 守护进程的三个问题 (功能不变), 外加一条实测工具。
+热修: v1.0.7 的 wheel 在 `publish create` / `publish edit` 之后会因 `NameError: cache` 崩 (源码导入漏了一行, 只在预热好的守护进程里才暴露), 这一版只补它 —— 没有别的改动。 没升到 v1.0.7 的直接升 v1.0.8 即可。
 
 ## 🐛 修复
 
@@ -45,7 +45,7 @@ gitx daemon stop             # 立刻退出 (毫秒级)
 
 ```bash
 gitx upgrade                                  # 已在 v1.0.5 及以后: 直接自更新
-uv tool install gitx-1.0.7-py3-none-any.whl    # 或装 wheel
+uv tool install gitx-1.0.8-py3-none-any.whl    # 或装 wheel
 gitx daemon restart                            # 守护进程在用的话, 重启它以加载新代码
 
 # 验证
@@ -55,8 +55,8 @@ gitx daemon bench     # 看这台机器上到底省了多少
 
 ## 🔗 相关
 
-- 源码: https://github.com/FLT18355/gitx/tree/v1.0.7
-- 完整变更: `git log v1.0.6..v1.0.7 --oneline`
+- 源码: https://github.com/FLT18355/gitx/tree/v1.0.8
+- 完整变更: `git log v1.0.7..v1.0.8 --oneline`
 
 ---
 

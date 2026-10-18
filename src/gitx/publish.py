@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import os
 
-from . import console, ghcli
+from . import cache, console, ghcli
 
 LIST_FIELDS = "tagName,name,isDraft,isPrerelease,isLatest,createdAt,publishedAt"
 # gh release view 的 JSON 字段集与 list 不同 (没有 isLatest)

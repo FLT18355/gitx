@@ -18,65 +18,6 @@
 > (选择器/进度条不再重付导入), 并新增 **`gitx daemon bench`** 在你机器上实测差距
 > (本机示例: 1.9s → 1.4s)。
 >
-> **v1.0.6: 召唤守护进程 · 缓存 · 更多配置 (`daemon` / `cache` / `palette`)** ——
-> 新增 **守护进程** (`daemon = false`, 默认关): 开启后运行任意 gitx 命令会自动拉起一个预热进程,
-> 后续命令由它 fork 执行, 省掉每次重付的导入开销 (低配机 1-2 秒); 附带把配色换成**终端自己的调色板**
-> (`palette = auto|terminal|mocha`), 低配终端不必为 24 位真彩色买单。
-> 新增 **缓存** (`~/.cache/gitx`, 默认开): 只读 API 响应 (仓库概览 / 搜索 / 发布, 默认 5 分钟) 与
-> 远端默认分支探测 (1 小时) 记下来, 少跑网络也少用 API 限额; `gitx cache / list / prune / clear` 管理。
-> 新增 8 项常用配置: `daemon` / `daemon_idle` / `palette` / `cache` / `cache_ttl` / `remote` /
-> `search_limit` / `repos_limit` (全部真正生效)。
-> 另修掉**中文打不进选择器**的老问题 (questionary 只绑了 ASCII), 裸 `gitx` 欢迎页改为无边框两列,
-> 并把开发文档拆到 `doc/` (README 只留用户向内容, 且写明"按需读, 不要通读")。
->
-> **v1.0.6-pre3: 交互式搜索 (`gitx search` / `gitx repos -q`)** ——
-> `gitx search` 不给关键词就是**交互式搜索**: 问一次搜索词 -> 结果表 -> ↑↓ 挑一个 -> 再选
-> 下载 / 看概览 / 打开网页, 挑完能接着挑下一个, 想换词就选「换个关键词再搜」
-> (`-i` 是带着关键词进同一界面, `-d` 仍是"挑一个直接下载");
-> `gitx repos` 也能**搜**了: `-q/--search` 走 `gh search repos` 搜得到全部仓库 (不受 `-n` 的
-> "只取前几个"限制), 挑选器底部还加了一条「用关键词搜全部仓库」, 挑着挑着想起关键词就能现场搜;
-> 顺手修掉**中文打不进筛选**的老问题 —— questionary 的筛选只绑了 ASCII, 中文按键会落到它自己的
-> "Disallow inserting other text" 上被丢掉, 现在「归档 / 下载 / 搜索」这类中文项也能打字筛选;
-> **裸 `gitx` 的欢迎页不再画表格**: 换成对齐的两列(无边框), 窄终端里说明折行会缩进到命令列之后。
->
-> **v1.0.6-pre2: 我的仓库管理 (`gitx repos`)** ——
-> 新增 **`gitx repos`**: 自己的仓库一条龙 —— 上下键挑一个仓库(最多同时渲染 5 行, 超出的随光标滚动, 打字即筛选) ->
-> 进**仓库编辑界面**(先摊开当前设置: 描述 / 主页 / 话题 / 可见性 / 默认分支 / 功能开关 / 模板 / star, 再一项一项地改, 改完自动刷新);
-> 另有 `list` / `view` / `edit`(非交互也可直接给选项) / `clone`(走加速) / `create` / `fork` / `rename` / `archive` / `sync` / `star` / `set-default` / `delete`,
-> 全部交给已登录的 `gh`; `-n/--limit` 决定一次取几个仓库来挑("只看前几个"), `-o` 可看别人的仓库。
->
-> **v1.0.6-pre1: Actions 运行与账号管理 (`gitx actions` / `gitx auth`)** ——
-> 新增 **`gitx actions`**: 工作流一条龙 —— 运行列表(按工作流 / 分支 / 状态 / 事件过滤)、详情(作业表 + `--verbose` 连步骤与耗时)、
-> 日志(`--log` / `--log-failed`)、`watch` 实时盯到结束、`rerun`(`--failed` 只重跑失败的作业)/ `cancel`、
-> `download` 下载运行产物、`workflows` 列工作流、`dispatch` 手动触发, 全部交给已登录的 `gh`;
-> 新增 **`gitx auth`**: 登录态管理 —— 状态表(当前账号标出来)/ 登录 / 退出 / 切换 / `refresh` 调权限 /
-> `token`(`--save` 顺手把令牌写进 gitx 配置, API 限额 60 → 5000 次/小时)/ `setup-git`;
-> 并把 `gh` 调用抽成共用层 `ghcli.py`: `publish` / `pr` / `actions` / `auth` 共用同一套前置检查与 JSON 解析。
->
-> **v1.0.5: 发行版管理 (`gitx publish`)** ——
-> 新增 **`gitx publish`**: 发行版一条龙 —— 列表 / 详情 / **创建并上传附件** / 补传附件 / 编辑(说明·预发布·草稿·最新) / 删除, 全部交给已登录的 `gh`。
-> 发行的附件就是本工具的两个构建产物(**wheel** + **源码包**), 官方安装方式是 `uv tool install`
-> (项目不再提供 Nuitka 二进制, 也没有 GitHub Actions 自动发版; 发版在本地一条命令完成, 见「发布」)。
-> 修复 **`gitx merge` / `gitx pull` 报"致命错误：储藏失败"**: git 合并前的快照 (`git stash create`) 在索引里有 "mtime 变了、内容没变" 的条目时会静默失败,
-> 现在合并 / 拉取前先刷新索引, 踩到就自动重试 (实测: 同样的干扰下裸 `git merge` 60 次失败 8 次, `gitx merge` 60 次全成功)。
-> (含 v1.0.5-pre1/pre2 的 skill 优化: 表格化命令速查、快速上手指南、常见问题解答。)
->
-> **v1.0.4: TOML 配置 + 五项新命令** ——
-> 配置文件换成人类可读的 **TOML**(`~/.config/gitx/config.toml`, 逐项中文注释, `gitx config set` 后注释不丢;
-> 旧的 `config.json` 首次运行自动迁移并保留为 `.json.bak`), 新增 `dest` / `resume` / `sync_rebase` /
-> `color` / `assume_yes` 五项配置, 并新增 `gitx config edit` / `gitx config path`;
-> 新增 **`gitx upgrade`**(自更新: 查 Release 与下 wheel 都走加速)、**`gitx remote`**(拉取加速 + 推送直连)、
-> **`gitx submodule`**(子模组也走加速)、**`gitx pr`**(列表 / 详情 / 创建)、**`gitx cache`**(缓存查看与清理);
-> `gitx download` 支持一次下多个链接(`-f` 从文件读、`-o` 指定目录); `gitx doctor --fix` 一键修好编码 / pull 策略 / 上游;
-> 修复 `gitx pull` 与 `gitx sync --merge` 在分支分歧时报"需要指定如何调和偏离的分支"、以及 `gitx proxy on <非法源>` 抛完整堆栈的问题。
-
-> **v1.0.3: 链接解析与配置修复** ——
-> 修复 `https://github.com/owner/repo/releases/latest` 这类链接无法识别的问题(此前 `gitx release <该链接>` 会直接抛栈),
-> 现在 `/releases`、`/releases/latest`、`/releases/tag/<标签>`、`/releases/download/...` 都能正确解析;
-> GitHub 链接可省略 `https://`, `gitx github.com/owner/repo` 直接下载;
-> 修好文档里承诺却一直没生效的配置项 `branch`(默认分支)—— 现在按 **`--branch` > URL 内分支 > 配置 `branch` > 远端默认分支** 依次生效;
-> `gitx stash` 列表不再显示 git 的 `On <分支>: ` 前缀; `gitx web` 对未知页面给出提示而非静默开首页;
-> `gitx url` / `gitx proxy` 检测 insteadOf 规则时不再吞掉自定义加速源的大小写; 并清掉三处死代码。
 
 默认走加速镜像 `https://v6.gh-proxy.org` 拉取, 推送直连 GitHub(镜像不支持推送)。
 

@@ -142,6 +142,23 @@ def hint(message: Any) -> None:
     console.print(f"    [dim]{escape(str(message))}[/dim]")
 
 
+def quicklist(rows: Sequence[tuple[str, str]], title: str = "") -> None:
+    """速查清单: 左边命令 (key 色), 右边说明; 只有对齐, 没有边框.
+
+    用 rich 的"无框表格"(box=None) 而不是手写对齐: 中文宽字符的列宽和窄终端里的
+    折行都由 rich 算好, 折行后的续行会自动缩进到说明列, 不会回到第 0 列;
+    但画面上没有一根竖线/横线, 因此读起来是一段说明而不是一张表。
+    """
+    grid = Table(box=None, show_header=False, pad_edge=False, expand=False, padding=(0, 2, 0, 0))
+    grid.add_column(no_wrap=True)
+    grid.add_column(overflow="fold")
+    for cmd, desc in rows:
+        grid.add_row(Text(f"  {cmd}", style="key"), Text(desc))
+    if title:
+        console.print(f"[title]{escape(title)}[/title]")
+    console.print(grid)
+
+
 def columns(items: Sequence[str], title: str = "", width: int = 26) -> None:
     """多列排布的清单 (模板名 / 标签等); rich.columns 按需导入."""
     from rich.columns import Columns
@@ -203,29 +220,61 @@ PICKER_STYLE = (
 MAX_VISIBLE = 5  # 交互列表最多同时渲染几行, 超出的部分靠上下键滚动
 
 
-def _picker(multi: bool, message: str, labels: Sequence[str], instruction: str) -> Any:
+def _any_char_bindings(control: Any) -> Any:
+    """让中文也能当筛选输入 (questionary 只认 ASCII 的按键).
+
+    questionary 的筛选只绑了 string.printable: 中文按键会落到它自己的 Keys.Any
+    绑定("Disallow inserting other text")上被丢掉, 于是"打字即筛选"对中文其实无效
+    (归档 / 下载 / 搜索 这些字打不进去)。这里补一份 Keys.Any 绑定并放在它前面 ——
+    同优先级时先注册者先匹配, 因此字符会喂给同一个筛选逻辑。
+    """
+    from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.keys import Keys
+
+    bindings = KeyBindings()
+
+    @bindings.add(Keys.Any, eager=True)
+    def _filter(event: Any) -> None:
+        data = event.data
+        if data and data.isprintable():  # 控制字符 (Ctrl+A 之类) 不进筛选词
+            control.add_search_character(data)
+
+    return bindings
+
+
+def _picker(multi: bool, message: str, labels: Sequence[str], instruction: str,
+            checked: Sequence[bool] | None = None) -> Any:
     """建一个 questionary 选择器 (列表窗口压到 MAX_VISIBLE 行, 打字即筛选).
 
     questionary 会连带拉进 prompt_toolkit (导入约 2 秒), 所以只在这里延迟加载,
-    普通命令不必付这份启动开销.
+    普通命令不必付这份启动开销. checked 给多选用, 决定各项初始是否已勾选.
     """
     import questionary
+    from prompt_toolkit.key_binding import merge_key_bindings
     from prompt_toolkit.layout.dimension import LayoutDimension
     from questionary.prompts.common import InquirerControl
 
     build = questionary.checkbox if multi else questionary.select
+    flags = list(checked or [])
     question = build(
         message,
-        choices=[questionary.Choice(title=label, value=i) for i, label in enumerate(labels)],
+        choices=[questionary.Choice(title=label, value=i,
+                                    checked=bool(flags[i]) if i < len(flags) else False)
+                 for i, label in enumerate(labels)],
         instruction=instruction or None,
         style=questionary.Style(PICKER_STYLE),
         use_search_filter=True,
         use_jk_keys=False,  # 搜索优先: j/k 让位给筛选输入
     )
     height = LayoutDimension.exact(min(len(labels), MAX_VISIBLE))
+    control = None
     for window in question.application.layout.find_all_windows():
         if isinstance(window.content, InquirerControl):
             window.height = height  # 超出部分由 prompt_toolkit 随光标滚动
+            control = window.content
+    if control is not None:
+        question.application.key_bindings = merge_key_bindings(
+            [_any_char_bindings(control), question.application.key_bindings])
     return question.ask()  # Ctrl+C -> None
 
 
@@ -234,10 +283,22 @@ def select(message: str, labels: Sequence[str], *, instruction: str = "") -> int
     return _picker(False, message, labels, instruction)
 
 
-def check(message: str, labels: Sequence[str], *, instruction: str = "") -> list[int] | None:
-    """上下键多选 (空格勾选), 直接打字即筛选; 返回下标 (升序), 中断返回 None."""
-    picked = _picker(True, message, labels, instruction)
+def check(message: str, labels: Sequence[str], *, instruction: str = "",
+          checked: Sequence[bool] | None = None) -> list[int] | None:
+    """上下键多选 (空格勾选), 直接打字即筛选; checked 决定初始勾选; 返回下标 (升序), 中断返回 None."""
+    picked = _picker(True, message, labels, instruction, checked)
     return None if picked is None else sorted(picked)
+
+
+def text(message: str, *, default: str = "", instruction: str = "") -> str | None:
+    """单行输入 (questionary, 与选择器同一套配色); 中断返回 None.
+
+    default 表现为光标前已填好的文本 (回车即采用), 因此"改哪一项就用当前值当默认"。
+    """
+    import questionary
+
+    return questionary.text(message, default=default, instruction=instruction or None,
+                            style=questionary.Style(PICKER_STYLE)).ask()
 
 
 def progress() -> Progress:

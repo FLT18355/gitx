@@ -19,26 +19,34 @@ from . import config, console, github, gitcmd
 SEARCH_SORTS = ("stars", "forks", "updated")
 
 
-def search(keyword: str, prefix: str | None, *, limit: int = 10, sort: str = "stars",
-           language: str = "") -> list[dict]:
-    """GitHub 仓库搜索 (走 API); 返回结果列表, 供 --download 继续下载."""
-    query = keyword.strip()
+def query(keyword: str, prefix: str | None, *, limit: int = 10, sort: str = "stars",
+          language: str = "") -> tuple[int, list[dict]]:
+    """GitHub 仓库搜索 (走 API): 返回 (命中总数, 结果列表).
+
+    与 search() 分开是为了交互式搜索: 它要拿到结果列表自己再画一遍挑选器。
+    """
+    text = keyword.strip()
+    if not text:
+        console.error("请给搜索词: gitx search <关键词>\n提示: 不带关键词 = 交互式搜索")
     if language:
-        query += f" language:{language}"
-    params = [f"q={urllib.parse.quote(query)}", f"per_page={max(1, min(int(limit), 50))}"]
+        text += f" language:{language}"
+    params = [f"q={urllib.parse.quote(text)}", f"per_page={max(1, min(int(limit), 50))}"]
     if sort in SEARCH_SORTS:
         params.append(f"sort={sort}")
     console.step(f"搜索 GitHub 仓库: {keyword}" + (" [加速]" if prefix else ""))
     data = github.api("https://api.github.com/search/repositories?" + "&".join(params), prefix)
     if not isinstance(data, dict):
-        return []
-    items = list(data.get("items") or [])[:limit]
+        return 0, []
+    return int(data.get("total_count") or 0), list(data.get("items") or [])[:limit]
+
+
+def render_results(total: int, items: list[dict], keyword: str = "") -> None:
+    """把搜索结果画成表: 序号 / 仓库 / star / 语言 / 最近更新 / 简介."""
     if not items:
         console.warn(f"没有匹配 {keyword!r} 的仓库")
-        return []
-
+        return
     table = console.table("#", "仓库", "★ star", "语言", "最近更新", "简介",
-                          title=f"共 {int(data.get('total_count') or 0):,} 个结果, 显示前 {len(items)} 个")
+                          title=f"共 {total:,} 个结果, 显示前 {len(items)} 个")
     for i, repo in enumerate(items, 1):
         full = str(repo.get("full_name") or "")
         url = str(repo.get("html_url") or "")
@@ -51,6 +59,15 @@ def search(keyword: str, prefix: str | None, *, limit: int = 10, sort: str = "st
             console.txt(str(repo.get("description") or "")[:60]),
         )
     console.print(table)
+
+
+def search(keyword: str, prefix: str | None, *, limit: int = 10, sort: str = "stars",
+           language: str = "") -> list[dict]:
+    """命令行用法: 搜索并打印结果表; 返回结果列表, 供 --download 继续下载."""
+    total, items = query(keyword, prefix, limit=limit, sort=sort, language=language)
+    render_results(total, items, keyword)
+    if not items:
+        return []
     console.info("下载: gitx <仓库链接>   |   看发布: gitx release owner/repo --tags")
     return items
 

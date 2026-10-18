@@ -1,7 +1,7 @@
 ---
 name: gitx
-version: 1.0.6-pre1
-description: 给中国人用的 GitHub 加速与同步工具 —— 下载 / 同步 / 加速 / 分支 / 暂存 / 标签 / 提交 / 改动 / 发行版 / Actions / 账号，一条命令搞定
+version: 1.0.6-pre3
+description: 给中国人用的 GitHub 加速与同步工具 —— 下载 / 同步 / 加速 / 分支 / 暂存 / 标签 / 提交 / 改动 / 发行版 / Actions / 账号 / 我的仓库，一条命令搞定
 author: FLT18355
 repository: https://github.com/FLT18355/gitx
 license: MIT
@@ -51,6 +51,8 @@ gitx sync                            # 同步当前仓库
 | 🏷️ **发行版管理** | `gitx publish` 创建 / 上传附件 / 编辑 / 删除（交给已登录的 gh） |
 | 📋 **Actions 运行** | `gitx actions` 运行列表 / 详情 / 日志 / 盯 / 重跑 / 产物下载 / 手动触发（交给 gh） |
 | 🔑 **账号管理** | `gitx auth` 登录态 / 登录 / 切换 / 权限 / 令牌（`token --save` 提升 API 限额） |
+| 🗂️ **我的仓库** | `gitx repos` 挑/搜仓库（`-q 关键词`）→ 编辑界面（描述 / 话题 / 可见性 / 功能开关 / 归档 / 删除，交给 gh） |
+| 🔎 **交互式搜索** | `gitx search` 不写关键词 = 问关键词 → 挑一个 → 下载 / 概览 / 网页；挑选器中文也能当筛选词 |
 | 🔄 **自更新** | `gitx upgrade` 查 Release 下 wheel 都走加速 |
 
 ---
@@ -122,6 +124,34 @@ gitx sync                            # 同步当前仓库
 > 登录 / 退出 / 切换 / 刷新都由 `gh` 自己做交互（设备码 / 浏览器 / SSH 密钥），gitx 只透传输出；
 > 没登录时 `gitx auth` 给中文提示。`--hostname` 供 GitHub Enterprise 使用。
 
+### 🗂️ 我的仓库 (挑一个 → 编辑界面，交给 gh)
+
+| 命令 | 说明 |
+|------|------|
+| `gitx repos` | ↑↓ 挑一个仓库（最多渲染 5 行，超出的随光标滚动，打字即筛选）→ 进**仓库编辑界面** |
+| `gitx repos -q dotfile` | 按关键词**搜**仓库（`gh search repos`，搜得到全部，不受 `-n` 限制；挑选器底部也有一条「用关键词搜全部仓库」） |
+| `gitx repos -n 5` | 只取最近 5 个仓库来挑（`-o` 看别人的仓库；`--visibility` / `-l` / `-t` / `--source` / `--fork` / `--no-archived` 过滤） |
+| `gitx repos edit [owner/repo]` | 跳过挑选直接进编辑界面；非交互则给选项：`-d` 描述 / `-H` 主页 / `-t`·`--remove-topic` 话题 / `--visibility` / `-b` 默认分支 / `--template`+`--no-template` / `--issues`·`--wiki`·`--projects`·`--discussions` |
+| `gitx repos list [-n 30]` | 表格列出仓库：仓库 / 描述 / 可见性 / ★ / 语言 / 更新 / 标记 |
+| `gitx repos view [owner/repo] [--web]` | 看当前设置（描述 / 主页 / 话题 / 可见性 / 默认分支 / 功能 / 模板 / star） |
+| `gitx repos clone [owner/repo] [-D 目录] [-d 深度]` | 克隆到本地（公开走加速，私有仓库交给 gh 克隆——加速镜像拉私有仓库会失败，推送仍直连） |
+| `gitx repos create <名字> [--source . --push]` | 新建仓库（`-d` / `-H` / `--visibility` / `--readme` / `-g` / `--license` / `-p` 模板 / `--no-issues` / `--no-wiki` / `--team`） |
+| `gitx repos fork [owner/repo] [-c]` | 复刻到自己的账号（`--org` / `--fork-name` / `--default-branch-only` / `--remote`） |
+| `gitx repos rename [owner/repo] [新名字]` | 改名（新名字留空问一次） |
+| `gitx repos archive\|unarchive [owner/repo]` | 归档 / 取消归档 |
+| `gitx repos sync [owner/repo] [-s 源] [-b 分支] [--force]` | 与上游 / 源仓库对齐 |
+| `gitx repos star\|unstar [owner/repo]` | 收藏 / 取消收藏 |
+| `gitx repos set-default [owner/repo]` | 设为当前目录的默认仓库 |
+| `gitx repos delete [owner/repo] [-y]` | 删除仓库（不可恢复，需要 delete_repo 权限） |
+
+> 编辑界面每轮都重画一遍当前设置：改描述 / 主页 / 话题 / 可见性 / 默认分支 / 功能开关 / 模板 /
+> 归档 / 收藏 / 改名 / 克隆 / 打开网页 / 设为默认 / 删除，选「完成」退出。
+> 每项都走 `gh repo edit` 且**只带变了的参数**（描述给原样不发请求，想清空就把内容删干净再回车）；
+> 改可见性先提示副作用（掉 star / 断复刻关系）并要求确认。
+> 所有子命令的仓库参数都可省略 —— 省略时先弹同一个挑选器，条数由 `-n` 决定（如 `gitx repos -n 5 delete`）。
+> 仓库多到记不住名字时用 `-q` 搜（`gh search repos`，搜得到全部）；挑选器底部也有一条「用关键词搜全部仓库」，
+> 选中即可现场搜一遍再接着挑。挑选器里中文/英文都能直接打字筛选（questionary 原生只认 ASCII，gitx 补了绑定）。
+
 ### 🔄 同步
 
 | 命令 | 说明 |
@@ -188,6 +218,7 @@ gitx sync                            # 同步当前仓库
 | 命令 | 说明 |
 |------|------|
 | `gitx search <关键词> [-n 10] [--language go] [-d]` | 搜索 GitHub 仓库 |
+| `gitx search` / `gitx search -i` | **交互式搜索**：问关键词 → 结果表 → ↑↓ 挑一个 → 下载 / 看概览 / 打开网页（挑完能接着挑，可选「换个关键词再搜」） |
 | `gitx stat [owner/repo] [--json]` | 仓库概览：★/fork/topics/语言/许可证/贡献者/最新发布 |
 | `gitx web [issues\|pulls\|releases\|...] [--print]` | 浏览器打开仓库页面 |
 | `gitx ignore python node [--force]` | 拉取 .gitignore 模板 |
@@ -306,6 +337,28 @@ gitx actions dispatch release.yml      # 手动触发一次 workflow_dispatch
 gitx auth                     # 看当前是哪个账号
 gitx auth switch              # 切换当前账号（多账号时）
 gitx auth token --save        # 令牌写进 gitx 配置，只读 API 限额 60 -> 5000 次/小时
+```
+
+### 场景 6e：管理自己的仓库（挑一个 → 编辑界面）
+
+```bash
+gitx repos                 # ↑↓ 挑一个仓库（最多渲染 5 行，打字即筛选）→ 进编辑界面：
+                           # 改描述 / 主页 / 话题 / 可见性 / 默认分支 / 功能开关 / 模板 /
+                           # 归档 / 收藏 / 改名 / 克隆 / 打开网页 / 设为默认 / 删除，选「完成」退出
+gitx repos -n 5            # 只取最近 5 个仓库来挑（仓库多时先缩范围）
+gitx repos -q dotfile      # 仓库多、记不住名字？按关键词搜（搜得到全部，不受 -n 限制）
+                           # 挑选器底部也有一条「用关键词搜全部仓库」，选中即可现场搜
+gitx repos -n 5 delete     # 子命令也能省略仓库：只在前 5 个里挑一个删
+gitx repos edit owner/repo -d "新描述" -t cli --no-wiki   # 非交互：直接给选项
+gitx repos view owner/repo # 看当前设置（--web 打开网页）
+```
+
+### 场景 6f：交互式搜仓库（不写关键词）
+
+```bash
+gitx search                # 问一次关键词 -> 结果表 -> ↑↓ 挑一个 -> 下载 / 看概览 / 打开网页
+gitx search -i "vim 插件"   # 带着关键词进交互界面（挑完能接着挑，或「换个关键词再搜」）
+gitx search "vim 插件" -d   # 不想要交互：搜完直接挑一个下载
 ```
 
 ### 场景 7：查看仓库快速概览

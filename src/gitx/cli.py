@@ -46,11 +46,12 @@ _CFG_KEYS = "/".join(config.DEFAULTS)
 _HELP = f"""[key]gitx[/key] -- 给中国人用的 GitHub 加速与同步工具 [dim]v{__version__}[/dim]
 
 拉取 (克隆 / 文件 / Release 附件 / API) 默认走加速镜像 [num]{accel.PROVIDERS['v6']}[/num], 推送直连 GitHub。
-直接给一个 GitHub 链接即可下载: [key]gitx https://github.com/owner/repo[/key]
+直接给一个 GitHub 链接或 [key]owner/repo[/key] 即可下载: [key]gitx cli/cli[/key]
 其它词一律透传 git, 且不加载 typer, 因此几乎瞬时: [key]gitx status[/key] / [key]gitx log --oneline[/key]"""
 
 _EPILOG = """[key]示例[/key]
   gitx https://github.com/owner/repo                下载仓库 -> ./repo
+  gitx cli/cli                                      链接可省成 owner/repo, 同上
   gitx https://github.com/owner/repo/tree/main/src  只下载某个文件夹 (部分克隆, 实测快 8 倍)
   gitx https://github.com/owner/repo -x             下载并解压源码包 (不用 git, 只取一个流)
   gitx release cli/cli --list                       看最新发布的附件清单
@@ -64,6 +65,7 @@ _EPILOG = """[key]示例[/key]
   gitx repos                                       上下键挑我的仓库 -> 进编辑界面 (改描述 / 话题 / 可见性)
   gitx repos -n 5                                  只取最近 5 个仓库来挑 (超出的不上屏)
   gitx repos -q dotfile                            按关键词搜仓库 (搜得到全部, 不受 -n 限制)
+  gitx repos --fresh                               不吃缓存, 重新向 GitHub 取一次
   gitx search "cli 工具" --language go -d           搜仓库并下载第 1 个
   gitx search                                      交互式搜: 问关键词 -> 挑一个 -> 下载 / 概览 / 网页
   gitx stat cli/cli                                 看仓库概览 (★ star / topics / 语言 / 贡献者)
@@ -106,7 +108,7 @@ def _version_callback(value: bool) -> None:
 
 # 只输入 gitx 时的速查表: (命令示例, 一句话说明)
 _WELCOME_TIPS: tuple[tuple[str, str], ...] = (
-    ("gitx <GitHub 链接>", "下载仓库 / 文件夹 / 文件 / 源码包 (默认加速)"),
+    ("gitx <链接|owner/repo>", "下载仓库 / 文件夹 / 文件 / 源码包 (默认加速)"),
     ("gitx release owner/repo", "交互式挑选并下载 Release 附件"),
     ("gitx publish", "发行版管理: 列表 / 创建 / 上传附件 / 编辑 / 删除"),
     ("gitx sync", "先拉取再推送, 一步完成日常同步 (默认变基)"),
@@ -122,7 +124,7 @@ _WELCOME_TIPS: tuple[tuple[str, str], ...] = (
     ("gitx pr / gitx submodule", "PR 列表与详情 / 子模组一条龙 (走加速)"),
     ("gitx actions", "Actions 运行: 列表 / 日志 / 重跑 / 产物下载 (交给 gh)"),
     ("gitx auth", "登录状态 / 切换账号 / 取令牌 (--save 提升 API 限额)"),
-    ("gitx repos", "挑/搜我的仓库 (-q 关键词) -> 进编辑界面改设置"),
+    ("gitx repos", "挑/搜我的仓库 (-q 关键词) -> 进编辑界面改设置 (结果走缓存, --fresh 回源)"),
     ("gitx daemon", "守护进程: 低配机提速 (config set daemon true 打开)"),
     ("gitx cache", "缓存: 查看 / 明细 / 清理 ~/.cache/gitx"),
     ("gitx upgrade", "自更新到最新版本 (下载走加速)"),
@@ -165,7 +167,7 @@ def _root(
 def download_cmd(
     targets: Annotated[list[str] | None, typer.Argument(
         metavar="URL|路径...",
-        help="一个或多个 GitHub 链接; 只给一个链接时, 第二个参数可当保存路径")] = None,
+        help="一个或多个 GitHub 链接 (也可写 owner/repo); 只给一个链接时, 第二个参数可当保存路径")] = None,
     branch: Annotated[str, typer.Option("--branch", "-b", help="指定分支")] = "",
     depth: Annotated[int | None, typer.Option("--depth", "-d", help="克隆深度, 0 = 完整克隆")] = None,
     archive: Annotated[bool, typer.Option("--archive", "-x", "--tarball",
@@ -196,7 +198,7 @@ def download_cmd(
     if links_file:
         urls += _read_links(links_file)
     if not urls:
-        console.error("请给出至少一个 GitHub 链接 (或 gitx download <链接...> -f 链接文件)")
+        console.error("请给出至少一个 GitHub 链接 / owner/repo (或 gitx download <链接...> -f 链接文件)")
     from .dispatch import is_download  # 仅此处用来区分"链接"和"保存路径"
 
     dest = output

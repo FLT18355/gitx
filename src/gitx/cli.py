@@ -1346,7 +1346,7 @@ _PICK: dict[str, object] = {}
 @repos_app.callback()
 def _repos_root(
     ctx: typer.Context,
-    limit: Annotated[int, typer.Option(
+    limit: Annotated[int | None, typer.Option(
         "--limit", "-n",
         help="一次取几个仓库来挑 (缺省用配置 repos_limit; 只想看前几个给小数字)")] = None,
     owner: Annotated[str, typer.Option("--owner", "-o", help="看谁的仓库 (默认当前登录账号)")] = "",
@@ -1360,21 +1360,43 @@ def _repos_root(
     no_archived: Annotated[bool, typer.Option("--no-archived", help="排除已归档仓库")] = False,
     search: Annotated[str, typer.Option(
         "--search", "-q", help="按关键词搜 (搜得到全部仓库, 不受 -n 限制)")] = "",
+    fresh: Annotated[bool, typer.Option(
+        "--fresh", help="不吃本地缓存, 重新向 GitHub 取一次")] = False,
 ) -> None:
     limit = limit or config.default_limit("repos_limit", 30)
-    # 不带子命令 = 上下键挑仓库 -> 进仓库编辑界面
+    # 过滤项写在子命令前面 (`gitx repos -o cli list`) 时, 要靠这里把它们带进子命令
     _PICK.update(owner=owner, limit=limit, visibility=visibility, language=language, topic=topic,
                  source=source, forks=forks, archived=archived, no_archived=no_archived,
-                 keyword=search)
+                 keyword=search, fresh=fresh)
     if ctx.invoked_subcommand is None:
         ghrepo.shell(owner=owner, limit=limit, visibility=visibility, language=language,
                      topic=topic, source=source, forks=forks, archived=archived,
-                     no_archived=no_archived, keyword=search)
+                     no_archived=no_archived, keyword=search, fresh=fresh)
 
 
 def _pick_target(target: str, what: str) -> str:
     """子命令的仓库参数: 留空就用仓库挑选器 (过滤选项同 `gitx repos`)."""
     return ghrepo.resolve(target, what=what, **_PICK)
+
+
+def _fresh() -> bool:
+    """`--fresh` 写在子命令前面 (`gitx repos --fresh view ...`) 时, 由子命令从这里取."""
+    return bool(_PICK.get("fresh"))
+
+
+_UNSET = ("", None, False)
+
+
+def _merged(**given: object) -> dict[str, object]:
+    """子命令自己的过滤选项优先; 没给 (空串 / 未开) 就沿用子命令前面的那些.
+
+    因此 `gitx repos -o cli list` 与 `gitx repos list -o cli` 等价 —— 选项写在子命令前后都生效。
+    """
+    merged = dict(given)
+    for name, value in given.items():
+        if value in _UNSET and _PICK.get(name) not in _UNSET:
+            merged[name] = _PICK[name]
+    return merged
 
 
 @repos_app.command("list")
@@ -1392,15 +1414,17 @@ def repos_list(
     no_archived: Annotated[bool, typer.Option("--no-archived", help="排除已归档仓库")] = False,
     search: Annotated[str, typer.Option(
         "--search", "-q", help="按关键词搜 (搜得到全部仓库, 不受 -n 限制)")] = "",
+    fresh: Annotated[bool, typer.Option("--fresh", help="不吃本地缓存, 重新向 GitHub 取一次")] = False,
 ) -> None:
     """列出仓库: 仓库 / 描述 / 可见性 / star / 语言 / 更新 / 标记.
 
     给 [key]-q[/key] 就是搜索 ([key]gitx repos list -q dotfiles[/key]), 否则按最近推送列前 [key]-n[/key] 个。
     """
-    limit = limit or config.default_limit("repos_limit", 30)
-    ghrepo.list_repos(owner, limit=limit, visibility=visibility, language=language, topic=topic,
-                      source=source, forks=forks, archived=archived, no_archived=no_archived,
-                      keyword=search or str(_PICK.get("keyword") or ""))
+    picked = _merged(owner=owner, visibility=visibility, language=language, topic=topic,
+                     source=source, forks=forks, archived=archived,
+                     no_archived=no_archived, keyword=search, fresh=fresh)
+    ghrepo.list_repos(limit=int(limit or _PICK.get("limit") or config.default_limit("repos_limit", 30)),
+                      **picked)  # type: ignore[arg-type]
 
 
 @repos_app.command("edit")
@@ -1464,7 +1488,7 @@ def repos_view(
     web: Annotated[bool, typer.Option("--web", "-w", help="在浏览器打开仓库页面")] = False,
 ) -> None:
     """看仓库的当前设置: 描述 / 主页 / 话题 / 可见性 / 默认分支 / 功能."""
-    ghrepo.view(_pick_target(target, "view"), web=web)
+    ghrepo.view(_pick_target(target, "view"), web=web, fresh=_fresh())
 
 
 @repos_app.command("clone")

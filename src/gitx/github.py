@@ -7,6 +7,7 @@ import re
 
 from . import __version__, accel, config, console, gitcmd
 
+_URL_SCHEMES = ("http://", "https://", "git://", "ssh://", "git@", "www.")
 _REPO_RE = re.compile(r"^https?://github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$")
 _TREE_RE = re.compile(r"^https?://github\.com/([^/]+)/([^/]+?)/tree/([^/]+)(?:/(.*))?/?$")
 _BLOB_RE = re.compile(r"^https?://github\.com/([^/]+)/([^/]+?)/(?:blob|raw)/([^/]+)/(.*?)/?$")
@@ -19,7 +20,7 @@ _RELEASE_RE = re.compile(
 
 
 def parse_url(url: str) -> dict:
-    """解析 GitHub 链接 -> {mode, owner, repo, branch, path[, tag]}.
+    """解析 GitHub 链接 (或 owner/repo 简写) -> {mode, owner, repo, branch, path[, tag]}.
 
     mode: repo | folder | file | release | asset
     仓库:     https://github.com/owner/repo
@@ -33,6 +34,12 @@ def parse_url(url: str) -> dict:
     url = url.strip().rstrip("/").split("?")[0]
     if url.startswith("github.com/"):
         url = "https://" + url
+    if not url.startswith(_URL_SCHEMES):
+        # owner/repo 简写 (gitx cli/cli): 等价于仓库链接, 省掉 https://github.com/
+        m = _REPO_ARG_RE.match(url)
+        if m:
+            return {"mode": "repo", "owner": m.group(1), "repo": m.group(2).removesuffix(".git"),
+                    "branch": "", "path": ""}
     m = _SSH_RE.match(url)
     if m:
         return {"mode": "repo", "owner": m.group(1), "repo": m.group(2), "branch": "", "path": ""}

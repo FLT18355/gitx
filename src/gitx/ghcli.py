@@ -23,9 +23,19 @@ def find(feature: str) -> str:
     return path
 
 
+_LOGGED_IN: bool | None = None  # 进程内缓存: 一条命令里会查很多次登录态
+
+
 def logged_in(path: str) -> bool:
-    """gh 是否已登录 (`gh auth status` 非 0 即未登录)."""
-    return gitcmd.capture([path, "auth", "status"])[0] == 0
+    """gh 是否已登录; 结果在进程内缓存一次 (每次调用都是一趟网络, 2-6 秒).
+
+    用 `gh auth token` 判断而不是 `gh auth status`: 两者结论一致, 但 token 只读本地
+    hosts.yml (约 0.5 秒), status 要校验凭据 (约 3 秒), 而 repos 一条命令会问很多次。
+    """
+    global _LOGGED_IN
+    if _LOGGED_IN is None:
+        _LOGGED_IN = gitcmd.capture([path, "auth", "token"])[0] == 0
+    return _LOGGED_IN
 
 
 def require(feature: str, *, login: bool = True, hint: str = "") -> str:

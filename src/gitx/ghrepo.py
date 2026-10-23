@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import os
 
-from . import config, console, download, ghcli
+from . import cache, config, console, download, ghcli
 
 # gh repo list / view 的 JSON 字段: 够画表格, 也够渲染编辑界面的"当前设置"
 LIST_FIELDS = ("nameWithOwner,description,visibility,isPrivate,isFork,isArchived,isTemplate,"
@@ -50,6 +50,15 @@ _VISIBILITY_ZH = {"public": "公开", "private": "私有", "internal": "内部"}
 
 # ---------------------------------------------------------------- 读
 
+# 仓库数据都是"读一次要好几秒"的网络结果 (gh 自己会先做一次 GraphQL 往返), 因此统一
+# 记进 ~/.cache/gitx: 缓存键以 ghrepo: 开头, 写操作后整批作废 (见 _forget)。
+# 命中时一条 `gitx repos -n 5` 从 7 秒掉到 1 秒内, 而 --fresh 可绕过缓存。
+_PREFIX = "ghrepo:"
+_VIEW_PREFIX = f"{_PREFIX}view:"
+_VISIBILITY_PREFIX = f"{_PREFIX}visibility:"
+_BRANCHES_PREFIX = f"{_PREFIX}branches:"
+
+
 def _gh() -> str:
     """已安装且已登录的 gh 路径 (管理仓库是写操作, 一定要登录态)."""
     return ghcli.require("管理仓库", hint="只读的仓库查询用 gitx stat / gitx search, 不需要 gh")
@@ -68,6 +77,21 @@ def _need(target: str, what: str) -> str:
         console.error(f"请给出仓库: gitx repos {what} <owner/repo>\n"
                       "提示: 直接 gitx repos 可以上下键挑一个")
     return nwo
+
+
+def _forget() -> None:
+    """写操作之后作废全部仓库缓存 (列表 / 搜索 / 详情 / 分支都源于同一份远端状态)."""
+    cache.drop_prefix(_PREFIX)
+
+
+def _remember(key: str, value: object) -> None:
+    """回源的结果一律写回缓存 —— --fresh 只跳过"读", 不跳过"写", 否则下一条命令又看到旧值."""
+    cache.put(key, value)
+
+
+def _recall(key: str, *, fresh: bool) -> object | None:
+    """取缓存; fresh=True (= --fresh) 时当作没命中, 强制回源."""
+    return None if fresh else cache.get(key)
 
 
 def _filters(visibility: str = "", *, source: bool = False, forks: bool = False,
@@ -92,15 +116,29 @@ def _filters(visibility: str = "", *, source: bool = False, forks: bool = False,
     return args
 
 
-def fetch_repos(owner: str = "", *, limit: int = DEFAULT_LIMIT, **filters: object) -> list[dict]:
+def _filter_key(filters: dict) -> str:
+    """过滤项 -> 稳定的缓存键片段 (只保留真正生效的项, 顺序固定)."""
+    active = sorted((name, value) for name, value in filters.items()
+                    if value not in ("", None, False))
+    return ",".join(f"{name}={value}" for name, value in active)
+
+
+def fetch_repos(owner: str = "", *, limit: int = DEFAULT_LIMIT, fresh: bool = False,
+                **filters: object) -> list[dict]:
     """我的 (或某个 owner 的) 仓库列表, 按最近推送从新到旧; limit 决定只取前几个."""
+    count = max(1, int(limit))
+    key = f"{_PREFIX}list:{owner or '@me'}:{count}:{_filter_key(filters)}"
+    hit = _recall(key, fresh=fresh)
+    if isinstance(hit, list):
+        return hit
     gh = _gh()
-    args = ["repo", "list", *([owner] if owner else []), "-L", str(max(1, int(limit))),
+    args = ["repo", "list", *([owner] if owner else []), "-L", str(count),
             "--json", LIST_FIELDS, *_filters(**filters)]  # type: ignore[arg-type]
-    console.step(f"正在取{owner or '我的'}仓库 (前 {max(1, int(limit))} 个) ...")
+    console.step(f"正在取{owner or '我的'}仓库 (前 {count} 个) ...")
     data = ghcli.json_out(gh, args, "列出仓库")
     if not isinstance(data, list):
         console.error("仓库数据异常, 请稍后重试")
+    _remember(key, data)
     return data
 
 
@@ -139,7 +177,11 @@ def _normalize(item: dict) -> dict:
 def _search_args(keyword: str, owner: str, limit: int, *, visibility: str = "",
                  source: bool = False, forks: bool = False, archived: bool = False,
                  no_archived: bool = False, language: str = "", topic: str = "") -> list[str]:
-    """gh search repos 的参数 (过滤项名字与 gh repo list 略有不同, 转发到对应开关)."""
+    """gh search repos 的参数 (过滤项名字与 gh repo list 略有不同, 转发到对应开关).
+
+    gh 的布尔开关只认 `--archived=true` 这种等号形式, `--archived true` 会把它当成
+    查询词的一部分而静默返回空结果, 因此这里一律用等号。
+    """
     args = ["search", "repos", keyword, "--owner", owner or "@me",
             "-L", str(max(1, int(limit))), "--json", SEARCH_FIELDS]
     if visibility:
@@ -149,46 +191,58 @@ def _search_args(keyword: str, owner: str, limit: int, *, visibility: str = "",
     if topic:
         args += ["--topic", topic]
     if archived:
-        args += ["--archived", "true"]
-    if no_archived:
-        args += ["--archived", "false"]
+        args.append("--archived=true")
+    elif no_archived:
+        args.append("--archived=false")
     if source:
-        args += ["--include-forks", "false"]
-    if forks:
-        args += ["--include-forks", "only"]
+        args.append("--include-forks=false")
+    elif forks:
+        args.append("--include-forks=only")
     return args
 
 
 def search_repos(keyword: str, owner: str = "", *, limit: int = DEFAULT_LIMIT,
-                 **filters: object) -> list[dict]:
+                 fresh: bool = False, **filters: object) -> list[dict]:
     """按关键词搜仓库 (仓库名 / 描述命中), 不受"只取前 -n 个"的限制."""
-    gh = _gh()
     text = keyword.strip()
     if not text:
         console.error("请给搜索词: gitx repos -q <关键词>")
+    count = max(1, int(limit))
+    key = f"{_PREFIX}search:{text}:{owner or '@me'}:{count}:{_filter_key(filters)}"
+    hit = _recall(key, fresh=fresh)
+    if isinstance(hit, list):
+        return hit
+    gh = _gh()
     console.step(f"搜索{owner or '我的'}仓库: {text}")
-    args = _search_args(text, owner, limit, **filters)  # type: ignore[arg-type]
+    args = _search_args(text, owner, count, **filters)  # type: ignore[arg-type]
     data = ghcli.json_out(gh, args, "搜索仓库")
     if not isinstance(data, list):
         console.error("仓库数据异常, 请稍后重试")
-    return [_normalize(item) for item in data if isinstance(item, dict)]
+    repos = [_normalize(item) for item in data if isinstance(item, dict)]
+    _remember(key, repos)
+    return repos
 
 
 def fetch(keyword: str = "", owner: str = "", *, limit: int = DEFAULT_LIMIT,
-          **filters: object) -> list[dict]:
+          fresh: bool = False, **filters: object) -> list[dict]:
     """有搜索词就搜 (搜得到全部), 没有就按最近推送列前 limit 个; 两者字段已统一."""
     if keyword.strip():
-        return search_repos(keyword, owner, limit=limit, **filters)
-    return fetch_repos(owner, limit=limit, **filters)
+        return search_repos(keyword, owner, limit=limit, fresh=fresh, **filters)
+    return fetch_repos(owner, limit=limit, fresh=fresh, **filters)
 
 
-def fetch_repo(target: str) -> dict:
+def fetch_repo(target: str, *, fresh: bool = False) -> dict:
     """单个仓库的当前设置 (编辑界面的数据源)."""
-    gh = _gh()
     nwo = _need(target, "edit")
+    key = f"{_VIEW_PREFIX}{nwo}"
+    hit = _recall(key, fresh=fresh)
+    if isinstance(hit, dict):
+        return hit
+    gh = _gh()
     repo = ghcli.json_out(gh, ["repo", "view", nwo, "--json", VIEW_FIELDS], f"查看仓库 {nwo}")
     if not isinstance(repo, dict):
         console.error("仓库数据异常, 请稍后重试")
+    _remember(key, repo)
     return repo
 
 
@@ -246,7 +300,7 @@ def _ask_keyword(current: str = "") -> str:
 
 
 def pick_repo(owner: str = "", *, limit: int = DEFAULT_LIMIT, message: str = "",
-              keyword: str = "", **filters: object) -> dict | None:
+              keyword: str = "", fresh: bool = False, **filters: object) -> dict | None:
     """上下键挑一个仓库 (最多渲染 5 行, 打字即筛选); Ctrl+C 返回 None.
 
     列表底部有一条"用关键词搜全部仓库": 选它就能输入关键词去 GitHub 搜 (搜得到全部,
@@ -258,7 +312,8 @@ def pick_repo(owner: str = "", *, limit: int = DEFAULT_LIMIT, message: str = "",
     if not console.is_terminal():
         console.error("挑仓库需要交互终端\n提示: 非交互请直接给出仓库名, 如 gitx repos view owner/repo")
     while True:
-        repos = fetch(keyword, owner, limit=limit, **filters)
+        repos = fetch(keyword, owner, limit=limit, fresh=fresh, **filters)
+        fresh = False  # 只让第一轮回源; 之后在列表里换关键词时照常吃缓存
         if not repos:
             if keyword:
                 console.warn(f"没有匹配 {keyword!r} 的仓库, 回到列表")
@@ -288,7 +343,7 @@ def pick_repo(owner: str = "", *, limit: int = DEFAULT_LIMIT, message: str = "",
 
 
 def resolve(target: str = "", *, owner: str = "", limit: int = DEFAULT_LIMIT, what: str = "",
-            keyword: str = "", **filters: object) -> str:
+            keyword: str = "", fresh: bool = False, **filters: object) -> str:
     """子命令的仓库参数: 给了就用它, 没给且终端里就上下键挑一个 (最多渲染 5 行).
 
     挑不到 (取消 / 非交互) 就中文提示并退出, 因此各子命令都能写成
@@ -299,7 +354,7 @@ def resolve(target: str = "", *, owner: str = "", limit: int = DEFAULT_LIMIT, wh
     if not console.is_terminal():
         console.error(f"请给出仓库: gitx repos {what or 'edit'} <owner/repo>\n"
                       "提示: 直接 gitx repos 可以上下键挑一个, 再进编辑界面")
-    picked = pick_repo(owner, limit=limit, keyword=keyword,
+    picked = pick_repo(owner, limit=limit, keyword=keyword, fresh=fresh,
                        message=f"选择要{what}的仓库" if what else "", **filters)
     if picked is None:  # 挑选器里 Ctrl+C: 与其它交互命令一致, 算取消而不是出错
         console.warn("已取消")
@@ -329,9 +384,9 @@ def _repo_table(repos: list[dict], title: str) -> None:
 
 
 def list_repos(owner: str = "", *, limit: int = DEFAULT_LIMIT, keyword: str = "",
-               **filters: object) -> None:
+               fresh: bool = False, **filters: object) -> None:
     """列出仓库: 仓库 / 描述 / 可见性 / star / 语言 / 更新 / 标记 (给关键词 = 搜索结果)."""
-    repos = fetch(keyword, owner, limit=limit, **filters)
+    repos = fetch(keyword, owner, limit=limit, fresh=fresh, **filters)
     where = f"{owner} 的" if owner else "我的"
     if not repos:
         if keyword:
@@ -346,7 +401,7 @@ def list_repos(owner: str = "", *, limit: int = DEFAULT_LIMIT, keyword: str = ""
     console.info("进编辑界面改设置: gitx repos   |   看某一个: gitx repos view <owner/repo>")
 
 
-def view(target: str = "", *, web: bool = False) -> None:
+def view(target: str = "", *, web: bool = False, fresh: bool = False) -> None:
     """查看单个仓库的设置 (--web 交给 gh 打开网页)."""
     gh = _gh()
     nwo = _nwo(target)
@@ -354,7 +409,8 @@ def view(target: str = "", *, web: bool = False) -> None:
     if web:
         ghcli.run(gh, [*args, "--web"], "打开仓库网页")
         return
-    repo = ghcli.json_out(gh, [*args, "--json", VIEW_FIELDS], "查看仓库")
+    repo = fetch_repo(nwo, fresh=fresh) if nwo else ghcli.json_out(
+        gh, [*args, "--json", VIEW_FIELDS], "查看仓库")
     if not isinstance(repo, dict):
         console.error("仓库数据异常, 请稍后重试")
     _show_settings(repo)
@@ -432,6 +488,7 @@ def edit(target: str, *, description: str | None = None, homepage: str | None = 
         return False
     console.step(f"更新 {nwo} 的设置 ({len(args)} 个参数) ...")
     ghcli.run(gh, ["repo", "edit", nwo, *args], "修改仓库设置")
+    _forget()
     console.done(f"{nwo} 已更新")
     return True
 
@@ -442,6 +499,7 @@ def star(target: str, *, on: bool = True) -> None:
     nwo = _need(target, "star")
     ghcli.run(gh, ["api", "-X", "PUT" if on else "DELETE", f"/user/starred/{nwo}"],
               "收藏仓库" if on else "取消收藏")
+    _forget()
     console.done(f"{nwo} 已{'收藏' if on else '取消收藏'}")
 
 
@@ -454,6 +512,7 @@ def rename(target: str, new_name: str) -> str:
     name = new_name.split("/")[-1]
     console.step(f"{nwo} 改名为 {name} ...")
     ghcli.run(gh, ["repo", "rename", name, "--repo", nwo, "--yes"], "改名")
+    _forget()
     owner = nwo.split("/")[0]
     console.done(f"{nwo} 已改名为 {owner}/{name}")
     return f"{owner}/{name}"
@@ -467,6 +526,7 @@ def delete(target: str, *, yes: bool = False) -> None:
         console.warn("已取消")
         return
     ghcli.run(gh, ["repo", "delete", nwo, "--yes"], "删除仓库")
+    _forget()
     console.done(f"{nwo} 已删除")
 
 
@@ -476,6 +536,7 @@ def archive(target: str, *, archived: bool = True) -> None:
     nwo = _need(target, "archive")
     ghcli.run(gh, ["repo", "archive" if archived else "unarchive", nwo],
               "归档仓库" if archived else "取消归档")
+    _forget()
     console.done(f"{nwo} 已{'归档' if archived else '取消归档'}")
 
 
@@ -492,6 +553,7 @@ def sync(target: str, *, source: str = "", branch: str = "", force: bool = False
         args.append("--force")
     console.step(f"同步 {nwo}" + (f" (源 {source})" if source else " (源 = 它的上游)") + " ...")
     ghcli.run(gh, args, "同步仓库")
+    _forget()
     console.done(f"{nwo} 已同步")
 
 
@@ -540,6 +602,7 @@ def create(name: str, *, visibility: str = "", description: str = "", homepage: 
         args.append("--disable-wiki")
     console.step(f"新建仓库 {name}" + (" (私有)" if visibility == "private" else "") + " ...")
     ghcli.run(gh, args, "新建仓库")
+    _forget()
     console.done(f"{name} 已创建")
 
 
@@ -561,6 +624,7 @@ def fork(target: str, *, clone_: bool = False, remote: bool = False, org: str = 
         args.append("--default-branch-only")
     console.step(f"复刻 {nwo} ...")
     ghcli.run(gh, args, "复刻仓库")
+    _forget()
     console.done(f"{nwo} 已复刻")
 
 
@@ -573,7 +637,7 @@ def clone(target: str, dest: str = "", *, depth: int = 1) -> None:
     path = os.path.join(base, name)
     if os.path.exists(path):
         console.error(f"目标已存在: {path}\n提示: 换个目录 (--dir) 或先删掉它")
-    if _private(gh, nwo):
+    if _private(nwo):
         console.step(f"私有仓库 {nwo}: 交给 gh 克隆 (自带登录凭据, 不走加速镜像) ...")
         ghcli.run(gh, ["repo", "clone", nwo, path], "克隆仓库")
         console.done(f"完成! 已保存到: {os.path.abspath(path)}")
@@ -581,22 +645,34 @@ def clone(target: str, dest: str = "", *, depth: int = 1) -> None:
     download.download(f"https://github.com/{nwo}", path, config.active_proxy(), depth)
 
 
-def _private(gh: str, nwo: str) -> bool:
-    """仓库是不是私有 / 内部 (查不到就当公开, 继续走加速)."""
-    code, out, _ = ghcli.capture(gh, ["repo", "view", nwo, "--json", "visibility"])
-    if code != 0:
+def _private(nwo: str) -> bool:
+    """仓库是不是私有 / 内部 (查不到就当公开, 继续走加速).
+
+    复用 fetch_repo 的缓存: 克隆前必然要判断可见性, 而这一步单独查要好几秒。
+    """
+    try:
+        repo = fetch_repo(nwo)
+    except SystemExit:
         return False
-    return "PUBLIC" not in out.upper()
+    return str(repo.get("visibility") or "").lower() != "public"
 
 
 # ---------------------------------------------------------------- 仓库编辑界面
 
 def _branches(nwo: str) -> list[str]:
     """仓库的分支名 (拿不到就返回空表, 由调用方退化成手输)."""
+    key = f"{_BRANCHES_PREFIX}{nwo}"
+    hit = _recall(key, fresh=False)
+    if isinstance(hit, list):
+        return [str(name) for name in hit]
     gh = _gh()
     code, out, _ = ghcli.capture(gh, ["api", f"repos/{nwo}/branches", "--paginate",
                                       "--jq", ".[].name"])
-    return [line.strip() for line in out.splitlines() if line.strip()] if code == 0 else []
+    if code != 0:
+        return []
+    names = [line.strip() for line in out.splitlines() if line.strip()]
+    _remember(key, names)
+    return names
 
 
 def _ask_text(prompt: str, current: str) -> str | None:
@@ -783,7 +859,7 @@ def _exists(nwo: str) -> bool:
 
 
 def shell(target: str = "", *, owner: str = "", limit: int = DEFAULT_LIMIT, keyword: str = "",
-          **filters: object) -> None:
+          fresh: bool = False, **filters: object) -> None:
     """交互式仓库管理: 上下键挑仓库 -> 进编辑界面, 一项一项地改到满意.
 
     界面每轮重画一次当前设置, 因此改完一眼就能看到结果; 选"完成"或 Ctrl+C 退出。
@@ -791,8 +867,8 @@ def shell(target: str = "", *, owner: str = "", limit: int = DEFAULT_LIMIT, keyw
     if not console.is_terminal():
         console.error("编辑界面需要交互终端\n"
                       "提示: 非交互请用 gitx repos edit <owner/repo> 直接给选项")
-    repo = (fetch_repo(target) if target
-            else pick_repo(owner, limit=limit, keyword=keyword, **filters))
+    repo = (fetch_repo(target, fresh=fresh) if target
+            else pick_repo(owner, limit=limit, keyword=keyword, fresh=fresh, **filters))
     if repo is None:
         console.warn("已取消")
         return

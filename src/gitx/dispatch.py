@@ -7,16 +7,18 @@
     gitx -V / --version                                        -> 直接打印版本
     gitx help / -h / --install-completion / --show-completion  -> 交给 typer (帮助 / 补全)
     gitx 自己的子命令 (含 branch / switch / stash / tag 等)       -> 交给 cli.py
-    其余 (typer 子命令 / GitHub 链接)                            -> 交给 cli.py
+    其余 (typer 子命令 / GitHub 链接 / owner/repo)                 -> 交给 cli.py
 
 判定"这是不是 git 命令"不再需要 `git help -a` (一次子进程 ~0.2 秒, 且输出随语言
-变化): 不是 gitx 自己的子命令、也不像链接的词, 直接原样交给 git, 由 git 自己报错。
-笔误提示只在 git 自己判定"不是 git 命令" (退出码 1) 时补一句, 因此 `gitx log` /
-`gitx status` 这类真实 git 命令不会被提示抢走, 也不会多花一次探测的子进程。
+变化): 不是 gitx 自己的子命令、也不像链接或 owner/repo 简写的词, 直接原样交给 git,
+由 git 自己报错。笔误提示只在 git 自己判定"不是 git 命令" (退出码 1) 时补一句, 因此
+`gitx log` / `gitx status` 这类真实 git 命令不会被提示抢走, 也不会多花一次探测的子进程。
 """
 
 from __future__ import annotations
 
+import os
+import re
 import subprocess
 import sys
 
@@ -41,11 +43,17 @@ _PARTIAL = {
 }
 
 _DOWNLOAD_PREFIXES = ("http://", "https://", "git@", "git://", "ssh://", "www.", "github.com/")
+_REPO_SHAPE = re.compile(r"^[A-Za-z0-9][\w.-]*/[\w.-]+$")  # owner/repo 简写 (排除 ./ ../)
 
 
 def is_download(token: str) -> bool:
-    """看形状判断是否像可直接下载的链接 (不导入 github 模块)."""
-    return token.startswith(_DOWNLOAD_PREFIXES)
+    """看形状判断是否像可直接下载的链接或 owner/repo 简写 (不导入 github 模块).
+
+    本地真有一个同名路径时 (如 `src/gitx`) 就不当链接: 那多半是相对路径, 交回 git 处理。
+    """
+    if token.startswith(_DOWNLOAD_PREFIXES):
+        return True
+    return bool(_REPO_SHAPE.match(token)) and not os.path.exists(token)
 
 
 def _close_subcommand(name: str) -> str:

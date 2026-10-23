@@ -96,6 +96,16 @@ def drop(key: str) -> None:
         _entry_path(key).unlink()
 
 
+def drop_prefix(prefix: str) -> int:
+    """删掉键名以 prefix 开头的条目 (某个功能写出新数据后, 只作废它自己的缓存)."""
+    count = 0
+    for item in entries():
+        if str(item["key"]).startswith(prefix):
+            drop(str(item["key"]))
+            count += 1
+    return count
+
+
 def entries() -> list[dict]:
     """列出所有键值缓存: [{key, at, ttl, age, alive, size}] (按新旧排序)."""
     root = config.cache_dir() / _ENTRY_DIR

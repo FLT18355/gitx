@@ -6,6 +6,15 @@
 > 发版步骤在 `doc/发布流程.md`, 给 AI agent 的命令速查在 `skill/gitx/SKILL.md`。
 > AI / 协作者请**只读当前任务相关的那一份**, 不要为了"了解全貌"把文档全读一遍。
 
+> **v1.1.0-pre1: 短链接 + repos 提速** ——
+> ① **`gitx owner/repo` 直接下载**: 不用再打 `https://github.com/`, 形如 `gitx cli/cli` 即可
+> (本地真有同名路径时仍按相对路径交给 git, 不会被截走);
+> ② **`gitx repos` 提速**: 仓库列表 / 搜索 / 详情 / 分支都进 `~/.cache/gitx` 缓存
+> (实测 `repos list -n 3` 7.9s → 1.4s), 写操作后自动作废, `--fresh` 可强制回源;
+> 登录态判断从 `gh auth status` (每次 2-6 秒) 换成 `gh auth token` 并只查一次;
+> ③ 修 `repos` 的两处 bug: `-q` 搜索时 `--archived` / `--fork` 被 gh 静默忽略 (布尔开关必须写成
+> `--archived=true`), 以及 `gitx repos -o cli list` 这类**过滤项写在子命令前**时选项丢失。
+>
 > **v1.0.8: 热修 v1.0.7** —— v1.0.7 的 wheel 在 `publish create`/`edit` 后会因
 > `NameError: cache` 崩 (源码导入漏了一行, 只在预热好的守护进程里才暴露), 这版只补它; 没升过的直接升 1.0.8。
 >
@@ -18,65 +27,6 @@
 > (选择器/进度条不再重付导入), 并新增 **`gitx daemon bench`** 在你机器上实测差距
 > (本机示例: 1.9s → 1.4s)。
 >
-> **v1.0.6: 召唤守护进程 · 缓存 · 更多配置 (`daemon` / `cache` / `palette`)** ——
-> 新增 **守护进程** (`daemon = false`, 默认关): 开启后运行任意 gitx 命令会自动拉起一个预热进程,
-> 后续命令由它 fork 执行, 省掉每次重付的导入开销 (低配机 1-2 秒); 附带把配色换成**终端自己的调色板**
-> (`palette = auto|terminal|mocha`), 低配终端不必为 24 位真彩色买单。
-> 新增 **缓存** (`~/.cache/gitx`, 默认开): 只读 API 响应 (仓库概览 / 搜索 / 发布, 默认 5 分钟) 与
-> 远端默认分支探测 (1 小时) 记下来, 少跑网络也少用 API 限额; `gitx cache / list / prune / clear` 管理。
-> 新增 8 项常用配置: `daemon` / `daemon_idle` / `palette` / `cache` / `cache_ttl` / `remote` /
-> `search_limit` / `repos_limit` (全部真正生效)。
-> 另修掉**中文打不进选择器**的老问题 (questionary 只绑了 ASCII), 裸 `gitx` 欢迎页改为无边框两列,
-> 并把开发文档拆到 `doc/` (README 只留用户向内容, 且写明"按需读, 不要通读")。
->
-> **v1.0.6-pre3: 交互式搜索 (`gitx search` / `gitx repos -q`)** ——
-> `gitx search` 不给关键词就是**交互式搜索**: 问一次搜索词 -> 结果表 -> ↑↓ 挑一个 -> 再选
-> 下载 / 看概览 / 打开网页, 挑完能接着挑下一个, 想换词就选「换个关键词再搜」
-> (`-i` 是带着关键词进同一界面, `-d` 仍是"挑一个直接下载");
-> `gitx repos` 也能**搜**了: `-q/--search` 走 `gh search repos` 搜得到全部仓库 (不受 `-n` 的
-> "只取前几个"限制), 挑选器底部还加了一条「用关键词搜全部仓库」, 挑着挑着想起关键词就能现场搜;
-> 顺手修掉**中文打不进筛选**的老问题 —— questionary 的筛选只绑了 ASCII, 中文按键会落到它自己的
-> "Disallow inserting other text" 上被丢掉, 现在「归档 / 下载 / 搜索」这类中文项也能打字筛选;
-> **裸 `gitx` 的欢迎页不再画表格**: 换成对齐的两列(无边框), 窄终端里说明折行会缩进到命令列之后。
->
-> **v1.0.6-pre2: 我的仓库管理 (`gitx repos`)** ——
-> 新增 **`gitx repos`**: 自己的仓库一条龙 —— 上下键挑一个仓库(最多同时渲染 5 行, 超出的随光标滚动, 打字即筛选) ->
-> 进**仓库编辑界面**(先摊开当前设置: 描述 / 主页 / 话题 / 可见性 / 默认分支 / 功能开关 / 模板 / star, 再一项一项地改, 改完自动刷新);
-> 另有 `list` / `view` / `edit`(非交互也可直接给选项) / `clone`(走加速) / `create` / `fork` / `rename` / `archive` / `sync` / `star` / `set-default` / `delete`,
-> 全部交给已登录的 `gh`; `-n/--limit` 决定一次取几个仓库来挑("只看前几个"), `-o` 可看别人的仓库。
->
-> **v1.0.6-pre1: Actions 运行与账号管理 (`gitx actions` / `gitx auth`)** ——
-> 新增 **`gitx actions`**: 工作流一条龙 —— 运行列表(按工作流 / 分支 / 状态 / 事件过滤)、详情(作业表 + `--verbose` 连步骤与耗时)、
-> 日志(`--log` / `--log-failed`)、`watch` 实时盯到结束、`rerun`(`--failed` 只重跑失败的作业)/ `cancel`、
-> `download` 下载运行产物、`workflows` 列工作流、`dispatch` 手动触发, 全部交给已登录的 `gh`;
-> 新增 **`gitx auth`**: 登录态管理 —— 状态表(当前账号标出来)/ 登录 / 退出 / 切换 / `refresh` 调权限 /
-> `token`(`--save` 顺手把令牌写进 gitx 配置, API 限额 60 → 5000 次/小时)/ `setup-git`;
-> 并把 `gh` 调用抽成共用层 `ghcli.py`: `publish` / `pr` / `actions` / `auth` 共用同一套前置检查与 JSON 解析。
->
-> **v1.0.5: 发行版管理 (`gitx publish`)** ——
-> 新增 **`gitx publish`**: 发行版一条龙 —— 列表 / 详情 / **创建并上传附件** / 补传附件 / 编辑(说明·预发布·草稿·最新) / 删除, 全部交给已登录的 `gh`。
-> 发行的附件就是本工具的两个构建产物(**wheel** + **源码包**), 官方安装方式是 `uv tool install`
-> (项目不再提供 Nuitka 二进制, 也没有 GitHub Actions 自动发版; 发版在本地一条命令完成, 见「发布」)。
-> 修复 **`gitx merge` / `gitx pull` 报"致命错误：储藏失败"**: git 合并前的快照 (`git stash create`) 在索引里有 "mtime 变了、内容没变" 的条目时会静默失败,
-> 现在合并 / 拉取前先刷新索引, 踩到就自动重试 (实测: 同样的干扰下裸 `git merge` 60 次失败 8 次, `gitx merge` 60 次全成功)。
-> (含 v1.0.5-pre1/pre2 的 skill 优化: 表格化命令速查、快速上手指南、常见问题解答。)
->
-> **v1.0.4: TOML 配置 + 五项新命令** ——
-> 配置文件换成人类可读的 **TOML**(`~/.config/gitx/config.toml`, 逐项中文注释, `gitx config set` 后注释不丢;
-> 旧的 `config.json` 首次运行自动迁移并保留为 `.json.bak`), 新增 `dest` / `resume` / `sync_rebase` /
-> `color` / `assume_yes` 五项配置, 并新增 `gitx config edit` / `gitx config path`;
-> 新增 **`gitx upgrade`**(自更新: 查 Release 与下 wheel 都走加速)、**`gitx remote`**(拉取加速 + 推送直连)、
-> **`gitx submodule`**(子模组也走加速)、**`gitx pr`**(列表 / 详情 / 创建)、**`gitx cache`**(缓存查看与清理);
-> `gitx download` 支持一次下多个链接(`-f` 从文件读、`-o` 指定目录); `gitx doctor --fix` 一键修好编码 / pull 策略 / 上游;
-> 修复 `gitx pull` 与 `gitx sync --merge` 在分支分歧时报"需要指定如何调和偏离的分支"、以及 `gitx proxy on <非法源>` 抛完整堆栈的问题。
-
-> **v1.0.3: 链接解析与配置修复** ——
-> 修复 `https://github.com/owner/repo/releases/latest` 这类链接无法识别的问题(此前 `gitx release <该链接>` 会直接抛栈),
-> 现在 `/releases`、`/releases/latest`、`/releases/tag/<标签>`、`/releases/download/...` 都能正确解析;
-> GitHub 链接可省略 `https://`, `gitx github.com/owner/repo` 直接下载;
-> 修好文档里承诺却一直没生效的配置项 `branch`(默认分支)—— 现在按 **`--branch` > URL 内分支 > 配置 `branch` > 远端默认分支** 依次生效;
-> `gitx stash` 列表不再显示 git 的 `On <分支>: ` 前缀; `gitx web` 对未知页面给出提示而非静默开首页;
-> `gitx url` / `gitx proxy` 检测 insteadOf 规则时不再吞掉自定义加速源的大小写; 并清掉三处死代码。
 
 默认走加速镜像 `https://v6.gh-proxy.org` 拉取, 推送直连 GitHub(镜像不支持推送)。
 
@@ -116,6 +66,7 @@ gitx https://github.com/owner/repo -X               # 下载并直接解压
 gitx https://github.com/owner/repo/tree/分支/路径   # 文件夹 (部分克隆 + 稀疏检出, 只取目标目录)
 gitx https://github.com/owner/repo/blob/分支/路径/文件  # 单个文件
 gitx github.com/owner/repo                          # 链接可省略 https://, 效果同上
+gitx owner/repo                                     # 只剩 owner/repo 也行 (等价于 https://github.com/owner/repo)
 gitx clone https://github.com/owner/repo 我的目录   # 等价 download
 gitx download url1 url2 -o 下载目录                  # 批量: 一次下多个链接 (失败的不影响其余)
 gitx download -f 链接.txt -o 下载目录                # 从文本文件读链接 (每行一个, # 注释; - 读标准输入)
@@ -291,12 +242,19 @@ gitx auth setup-git                       # 让 git 的 https 推送 / 拉取走
 不受"只取前 `-n` 个"的限制); 挑选器底部也有一条「用关键词搜全部仓库」, 挑着挑着想起关键词, 选中它
 就能现场搜一遍再接着挑 (中文也能打进去筛, 不必切成英文关键词)。
 
+**结果会缓存**: 仓库列表 / 搜索 / 详情 / 分支都记在 `~/.cache/gitx` (默认 5 分钟, 走 `cache_ttl`),
+所以同一批仓库反复挑、反复看设置时不再每次都等 gh 的几秒往返 (`repos list -n 3` 实测 7.9s → 1.4s);
+任何写操作(改设置 / 收藏 / 改名 / 归档 / 删除 / 新建 / 复刻 / 同步)之后自动作废, 不会看到旧数据;
+想立刻要 GitHub 上的最新状态就加 `--fresh` (想整体关掉缓存: `gitx config set cache false`)。
+
 ```bash
 gitx repos                     # 挑仓库 -> 编辑界面 (改描述 / 话题 / 可见性 / 默认分支 / 功能开关 ...)
 gitx repos -n 5                # 只取最近 5 个仓库来挑 (只想看前几个就给个小数字)
 gitx repos -q dotfile          # 按关键词搜我的仓库 (搜得到全部, 不受 -n 限制)
 gitx repos -o cli -n 20        # 看别人的仓库 (还能按 --visibility / -l 语言 / -t 话题 / --source 过滤)
+gitx repos -o cli list         # 过滤项写在子命令前后都行 (等价于 repos list -o cli)
 gitx repos -q pet list         # 列出搜索命中的仓库 (子命令与 -q 可组合)
+gitx repos --fresh             # 不吃缓存, 重新向 GitHub 取一次列表
 gitx repos edit owner/repo     # 跳过挑选, 直接进这个仓库的编辑界面
 gitx repos edit owner/repo -d "新描述" -t cli -t 工具 --no-wiki   # 非交互: 直接给选项
 gitx repos list                # 表格形式列出我的仓库: 仓库 / 描述 / 可见性 / ★ / 语言 / 更新 / 标记
@@ -317,7 +275,7 @@ gitx repos delete owner/repo -y       # 删除 (不可恢复, 需要 delete_repo
 | `repos` | 挑仓库 -> 进编辑界面 | `-q` 关键词搜 (全量, 不受 `-n` 限制), `-n` 一次取几个仓库来挑, `-o` 谁的仓库, `--visibility` / `-l` / `-t` / `--source` / `--fork` / `--archived` / `--no-archived` 过滤 |
 | `repos list` | 仓库表格 (给 `-q` 就是搜索结果) | 同上 |
 | `repos edit` | 改设置 (不给选项 = 进编辑界面) | `-d` 描述, `-H` 主页, `-t` / `--remove-topic` 话题, `--visibility` (会确认), `-b` 默认分支, `--template`+`--no-template`, `--issues`+`--no-issues` / `--wiki` / `--projects` / `--discussions`, `-y` 跳过可见性确认 |
-| `repos view` | 看当前设置 | `--web` 打开网页 |
+| `repos view` | 看当前设置 | `--web` 打开网页; 结果走缓存, 要最新状态先在 `repos` 前加 `--fresh` |
 | `repos clone` | 克隆 (公开走加速, 私有交给 gh) | `-D` 目录, `-d` 深度 (0 = 完整克隆) |
 | `repos create` | 新建仓库 | `-d` 描述, `-H` 主页, `--visibility`, `--readme`, `-g` gitignore 模板, `--license`, `-p` 模板仓库, `-s` 本地目录当源, `--push` / `-c` / `--no-issues` / `--no-wiki` / `--team` |
 | `repos fork` | 复刻 | `-c` 顺手克隆, `--remote`, `--org`, `--fork-name`, `--default-branch-only` |

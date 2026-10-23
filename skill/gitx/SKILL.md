@@ -1,6 +1,6 @@
 ---
 name: gitx
-version: 1.0.8
+version: 1.1.0-pre1
 description: 给中国人用的 GitHub 加速与同步工具 —— 下载 / 同步 / 加速 / 分支 / 暂存 / 标签 / 提交 / 改动 / 发行版 / Actions / 账号 / 我的仓库，一条命令搞定
 author: FLT18355
 repository: https://github.com/FLT18355/gitx
@@ -26,6 +26,7 @@ gitx doctor
 
 # 3. 开始使用（示例）
 gitx https://github.com/user/repo    # 加速克隆
+gitx user/repo                       # 同上: owner/repo 简写, 不必打 https://github.com/
 gitx release user/repo               # 加速下载 Release
 gitx sync                            # 同步当前仓库
 ```
@@ -47,13 +48,13 @@ gitx sync                            # 同步当前仓库
 | ⚡ **git 透传** | `gitx status` 等同原生 git，瞬时响应 |
 | 💾 **断点续传** | 中断后重跑自动续传，不浪费流量 |
 | ⚡ **召唤守护进程** | `daemon = true`（默认关）：预热进程 + fork 执行，省掉每次重付的导入开销；`palette` 顺带改用终端配色 |
-| 🗃️ **缓存** | 只读 API 响应 / 默认分支探测记在 `~/.cache/gitx`（`cache_ttl` 默认 300 秒），写操作后自动作废 |
+| 🗃️ **缓存** | 只读 API 响应 / 默认分支探测 / `repos` 的列表与详情记在 `~/.cache/gitx`（`cache_ttl` 默认 300 秒），写操作后自动作废，`--fresh` 强制回源 |
 | 🌲 **部分克隆** | 文件夹下载快 8 倍（稀疏检出） |
 | 🔁 **协作一条龙** | remote / submodule / pr 全部加速 |
 | 🏷️ **发行版管理** | `gitx publish` 创建 / 上传附件 / 编辑 / 删除（交给已登录的 gh） |
 | 📋 **Actions 运行** | `gitx actions` 运行列表 / 详情 / 日志 / 盯 / 重跑 / 产物下载 / 手动触发（交给 gh） |
 | 🔑 **账号管理** | `gitx auth` 登录态 / 登录 / 切换 / 权限 / 令牌（`token --save` 提升 API 限额） |
-| 🗂️ **我的仓库** | `gitx repos` 挑/搜仓库（`-q 关键词`）→ 编辑界面（描述 / 话题 / 可见性 / 功能开关 / 归档 / 删除，交给 gh） |
+| 🗂️ **我的仓库** | `gitx repos` 挑/搜仓库（`-q 关键词`）→ 编辑界面（描述 / 话题 / 可见性 / 功能开关 / 归档 / 删除，交给 gh）；列表与详情走缓存，`--fresh` 回源 |
 | 🔎 **交互式搜索** | `gitx search` 不写关键词 = 问关键词 → 挑一个 → 下载 / 概览 / 网页；挑选器中文也能当筛选词 |
 | 🔄 **自更新** | `gitx upgrade` 查 Release 下 wheel 都走加速 |
 
@@ -66,6 +67,7 @@ gitx sync                            # 同步当前仓库
 | 命令 | 说明 |
 |------|------|
 | `gitx <URL>` | 仓库浅克隆到当前目录 |
+| `gitx owner/repo` | 同上，链接可省成 `owner/repo`（`gitx cli/cli`） |
 | `gitx <URL> -x` | 下载源码包 tar.gz（无历史，最快） |
 | `gitx <URL> -X` | 下载并解压 |
 | `gitx <URL>/tree/分支/路径` | 下载文件夹（部分克隆） |
@@ -132,7 +134,7 @@ gitx sync                            # 同步当前仓库
 |------|------|
 | `gitx repos` | ↑↓ 挑一个仓库（最多渲染 5 行，超出的随光标滚动，打字即筛选）→ 进**仓库编辑界面** |
 | `gitx repos -q dotfile` | 按关键词**搜**仓库（`gh search repos`，搜得到全部，不受 `-n` 限制；挑选器底部也有一条「用关键词搜全部仓库」） |
-| `gitx repos -n 5` | 只取最近 5 个仓库来挑（`-o` 看别人的仓库；`--visibility` / `-l` / `-t` / `--source` / `--fork` / `--no-archived` 过滤） |
+| `gitx repos -n 5` | 只取最近 5 个仓库来挑（`-o` 看别人的仓库；`--visibility` / `-l` / `-t` / `--source` / `--fork` / `--no-archived` 过滤；`--fresh` 不吃缓存） |
 | `gitx repos edit [owner/repo]` | 跳过挑选直接进编辑界面；非交互则给选项：`-d` 描述 / `-H` 主页 / `-t`·`--remove-topic` 话题 / `--visibility` / `-b` 默认分支 / `--template`+`--no-template` / `--issues`·`--wiki`·`--projects`·`--discussions` |
 | `gitx repos list [-n 30]` | 表格列出仓库：仓库 / 描述 / 可见性 / ★ / 语言 / 更新 / 标记 |
 | `gitx repos view [owner/repo] [--web]` | 看当前设置（描述 / 主页 / 话题 / 可见性 / 默认分支 / 功能 / 模板 / star） |
@@ -151,6 +153,8 @@ gitx sync                            # 同步当前仓库
 > 每项都走 `gh repo edit` 且**只带变了的参数**（描述给原样不发请求，想清空就把内容删干净再回车）；
 > 改可见性先提示副作用（掉 star / 断复刻关系）并要求确认。
 > 所有子命令的仓库参数都可省略 —— 省略时先弹同一个挑选器，条数由 `-n` 决定（如 `gitx repos -n 5 delete`）。
+> 过滤选项写在子命令前后都生效（`gitx repos -o cli list` ≡ `gitx repos list -o cli`）。
+> 列表 / 搜索 / 详情 / 分支都走缓存（`cache_ttl` 默认 300 秒），写操作后自动作废；`--fresh` 强制回源。
 > 仓库多到记不住名字时用 `-q` 搜（`gh search repos`，搜得到全部）；挑选器底部也有一条「用关键词搜全部仓库」，
 > 选中即可现场搜一遍再接着挑。挑选器里中文/英文都能直接打字筛选（questionary 原生只认 ASCII，gitx 补了绑定）。
 
@@ -353,6 +357,7 @@ gitx repos                 # ↑↓ 挑一个仓库（最多渲染 5 行，打�
                            # 归档 / 收藏 / 改名 / 克隆 / 打开网页 / 设为默认 / 删除，选「完成」退出
 gitx repos -n 5            # 只取最近 5 个仓库来挑（仓库多时先缩范围）
 gitx repos -q dotfile      # 仓库多、记不住名字？按关键词搜（搜得到全部，不受 -n 限制）
+gitx repos --fresh         # 不吃缓存，重新向 GitHub 取一次（默认 5 分钟内复用缓存）
                            # 挑选器底部也有一条「用关键词搜全部仓库」，选中即可现场搜
 gitx repos -n 5 delete     # 子命令也能省略仓库：只在前 5 个里挑一个删
 gitx repos edit owner/repo -d "新描述" -t cli --no-wiki   # 非交互：直接给选项

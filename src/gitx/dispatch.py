@@ -26,7 +26,7 @@ from . import __version__
 
 # gitx 自身的子命令; 其余词一律视为 git 透传 (含用户的 git alias)
 SUBCOMMANDS = frozenset({
-    "download", "clone", "release", "publish",
+    "download", "clone", "release", "publish", "ws",
     "push", "pull", "sync", "fetch",
     "init", "info", "undo", "graph", "lg", "branches", "tidy", "url",
     "branch", "switch", "merge", "rebase",
@@ -37,6 +37,10 @@ SUBCOMMANDS = frozenset({
 })
 
 # 只接管自家子命令的命令: 其余参数 (gitx remote -v / gitx submodule foreach) 仍透传 git
+# gitx ws 的子命令; 其余第一个参数视为要克隆的仓库 (gitx ws owner/repo -> ws clone owner/repo)
+_WS_SUBS = frozenset({"list", "ls", "clone", "add", "rm", "remove", "status", "sync", "fetch", "info",
+                      "path", "cd", "each", "find", "root", "prune", "use", "spaces", "drop"})
+
 _PARTIAL = {
     "remote": frozenset({"list", "add", "remove", "rename", "set-url", "show"}),
     "submodule": frozenset({"add", "update", "status", "sync", "remove", "list"}),
@@ -54,6 +58,25 @@ def is_download(token: str) -> bool:
     if token.startswith(_DOWNLOAD_PREFIXES):
         return True
     return bool(_REPO_SHAPE.match(token)) and not os.path.exists(token)
+
+
+# 带值的选项: 跳过它的值, 才能认出真正的第一个位置参数
+_WS_VALUE_OPTS = frozenset({"--root", "--depth", "-d", "--branch", "-b", "--name", "-n",
+                            "--proxy", "--jobs", "-j", "--space", "-s"})
+
+
+def _first_positional(args: list[str]) -> str | None:
+    """第一个位置参数 (跳过选项与其取值); 全是选项时返回 None."""
+    skip = False
+    for arg in args:
+        if skip:
+            skip = False
+            continue
+        if arg.startswith("-"):
+            skip = arg in _WS_VALUE_OPTS
+            continue
+        return arg
+    return None
 
 
 def _close_subcommand(name: str) -> str:
@@ -99,6 +122,17 @@ def handle(argv: list[str]) -> tuple[int | None, list[str]]:
         sub = argv[1] if len(argv) > 1 else ""
         if sub in ("", "status", "start", "stop", "restart", "-h", "--help"):
             return daemon.control(argv[1:]), argv
+        return None, argv
+    if first in ("ws", "workspace"):
+        rest = argv[1:]
+        if first == "workspace":
+            return None, ["ws", *rest]
+        if rest and rest[0] in ("-l", "--list"):
+            return None, ["ws", "list", *rest[1:]]
+        # 第一个"非选项值"的词不是子命令 -> 视为要克隆的仓库 (选项原样保留在前面)
+        word = _first_positional(rest)
+        if word is not None and word not in _WS_SUBS:
+            return None, ["ws", "clone", *rest]
         return None, argv
     if first in SUBCOMMANDS:
         return None, argv

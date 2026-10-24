@@ -80,6 +80,39 @@ gitx download -f 链接.txt -o 下载目录                # 从文本文件读�
 **断点续传**: 中断的下载会留下 `<文件>.part`, 重跑自动带 `Range` 续传, 不用重来。
 下载整仓库后自动把推送地址指回直连 GitHub(存在全局加速规则时用 SSH), 保证 `gitx push` 不被镜像拒绝。
 
+### 工作区: 克隆一次, 之后统一管理
+
+```bash
+gitx ws owner/repo                     # 克隆到 ~/gitx-workspaces/repo 并登记
+gitx ws owner/repo ~/code/repo         # 克隆到指定目录 (目录已存在则视为父目录)
+gitx ws /path/to/local.git             # 本地 / 任意 git 地址也能克隆并登记
+gitx ws add ~/code/已有克隆             # 把已有仓库登记进来 (从 origin 识别 owner/repo)
+gitx ws | gitx ws list                 # 总览: 分支 / 改动 / 领先落后 / 最近提交 / 路径
+gitx ws status [名字...]                # 逐个看改动与上游
+gitx ws sync [名字...] [-j 4]           # 逐个 fetch + 变基拉取 (有改动的仓库只 fetch)
+gitx ws fetch [名字...]                 # 只更新远端跟踪引用
+gitx ws each git status -s              # 每个仓库都跑一遍同一条命令
+gitx ws path <名字> | gitx ws cd <名字>  # 取绝对路径 / 进入方法 (--shell 供 eval)
+gitx ws find <关键词>                    # 按名字 / owner/repo / 路径找
+gitx ws rm <名字...> [--delete] [-y]     # 移出清单 (--delete 连目录一起删)
+gitx ws prune                           # 清理目录已不存在的清单项
+gitx ws root [目录]                      # 查看 / 设置当前工作区的根目录
+gitx ws use <名字> [--root 目录]         # 切换默认工作区 (不存在就新建, 之后所有命令都作用在它上面)
+gitx ws spaces                          # 列出所有工作区 (默认的标出来)
+gitx ws drop <名字> [--delete]           # 删除工作区 (--delete 连仓库目录一起删)
+```
+
+**默认工作区**: 可以同时有多个工作区 (比如 `work` / `oss`), 每个有自己的根目录和仓库清单;
+`gitx ws use work` 之后, 不带 `-s` 的命令都作用在 `work` 上。临时换一个用 `-s 名字`:
+`gitx ws -s oss list` / `gitx ws sync -s oss`; 脚本里还可以用环境变量 `GITX_WS_SPACE=oss`。
+优先级: `-s/--space` > `GITX_WS_SPACE` > 清单里的默认工作区。
+
+名字默认取仓库名, 重名自动加后缀 (`repo-2`) 不会互相覆盖; 清单在 `~/.config/gitx/workspaces.json`,
+纯本地状态 —— 删掉只丢清单, 不动任何仓库; 旧版单工作区清单读取时自动升级。
+新工作区的根目录默认是 `~/gitx-workspaces/<名字>` (默认工作区是 `~/gitx-workspaces`,
+可用 `gitx config set workspace <目录>` 改), 单次克隆还可以 `--root` 临时指定。
+克隆同样走加速, 失败会自动清掉半截目录。
+
 ### 下载 Release 附件(通过 API, 默认加速)
 
 ```bash

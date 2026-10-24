@@ -77,6 +77,22 @@ gitx sync                            # 同步当前仓库
 | `gitx download url1 url2 -o 目录` | 批量下载多个链接 |
 | `gitx download -f links.txt` | 从文件读取链接（`#` 注释，`-` 读 stdin） |
 
+### 🗂️ 工作区（克隆 + 统一管理）
+
+| 命令 | 说明 |
+|------|------|
+| `gitx ws <owner/repo>` | 克隆到工作区 `~/gitx-workspaces/<repo>` 并登记 |
+| `gitx ws <仓库> <目录>` | 克隆到指定目录（已存在则视为父目录；本地/任意 git 地址也支持） |
+| `gitx ws add <目录>` | 登记已有本地克隆（从 origin 识别 owner/repo） |
+| `gitx ws` / `gitx ws list` | 总览：分支 / 改动 / 领先落后 / 最近提交 |
+| `gitx ws status` / `sync` / `fetch` | 逐个看改动 / fetch + 变基拉取（有改动只 fetch）/ 只 fetch |
+| `gitx ws each <命令...>` | 每个仓库都跑一遍同一条命令 |
+| `gitx ws path` / `cd <名字>` | 绝对路径 / 进入方法（`--shell` 输出 `cd`，可 `eval`） |
+| `gitx ws find` / `rm` / `prune` / `root` | 查找 / 移出清单（`--delete` 删目录）/ 清理失效项 / 当前工作区根目录 |
+| `gitx ws use <名字> [--root 目录]` | 切换默认工作区（不存在就新建），之后所有 `ws` 命令都作用在它上面 |
+| `gitx ws spaces` / `drop <名字>` | 列出所有工作区 / 删除工作区（`--delete` 连目录） |
+| `gitx ws -s <名字> ...` / `GITX_WS_SPACE` | 临时对另一个工作区操作 |
+
 ### 🏷️ 发行版管理 (发布方 · 全部交给已登录的 `gh`)
 
 | 命令 | 说明 |

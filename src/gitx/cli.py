@@ -25,7 +25,7 @@ from rich.markup import escape
 
 from . import (__version__, accel, actions, auth, branch, cache, config, console, daemon, download, ghrepo,
                gitcmd, github, hub, pr, publish, release, remote, repo, stash, submodule, sync, tag,
-               upgrade)
+               upgrade, workspace)
 
 PANEL_DL = "下载 (默认加速)"
 PANEL_PUB = "发行版管理 (创建 / 上传 / 编辑)"
@@ -54,6 +54,10 @@ _EPILOG = """[key]示例[/key]
   gitx cli/cli                                      链接可省成 owner/repo, 同上
   gitx https://github.com/owner/repo/tree/main/src  只下载某个文件夹 (部分克隆, 实测快 8 倍)
   gitx https://github.com/owner/repo -x             下载并解压源码包 (不用 git, 只取一个流)
+  gitx ws cli/cli                                   克隆到工作区 ~/gitx-workspaces/cli
+  gitx ws cli/cli ~/code/cli                        克隆到指定目录并登记
+  gitx ws sync                                      工作区里的仓库逐个拉取 (有改动只 fetch)
+  gitx ws each git status -s                        每个仓库都跑一遍同一条命令
   gitx release cli/cli --list                       看最新发布的附件清单
   gitx release cli/cli --asset '*linux_amd64*'      只下匹配的附件
   gitx publish create v1.0.5 dist/* -p -F 说明.md    创建发行版并上传附件 (交给 gh)
@@ -62,6 +66,9 @@ _EPILOG = """[key]示例[/key]
   gitx actions download -D 产物目录                   下载运行产物 (附件)
   gitx auth                                         看登录了哪些账号 (当前账号标出来)
   gitx auth token --save                            复用 gh 的令牌, 把 API 限额提到 5000 次/小时
+  gitx ws use work                                  切换默认工作区 -> ~/gitx-workspaces/work
+  gitx ws -s oss list                               临时看另一个工作区
+  gitx ws -h                                        工作区全部子命令 (list / add / rm / spaces / drop)
   gitx repos                                       上下键挑我的仓库 -> 进编辑界面 (改描述 / 话题 / 可见性)
   gitx repos -n 5                                  只取最近 5 个仓库来挑 (超出的不上屏)
   gitx repos -q dotfile                            按关键词搜仓库 (搜得到全部, 不受 -n 限制)
@@ -109,6 +116,8 @@ def _version_callback(value: bool) -> None:
 # 只输入 gitx 时的速查表: (命令示例, 一句话说明)
 _WELCOME_TIPS: tuple[tuple[str, str], ...] = (
     ("gitx <链接|owner/repo>", "下载仓库 / 文件夹 / 文件 / 源码包 (默认加速)"),
+    ("gitx ws owner/repo", "克隆到工作区并统一管理 (status / sync / each / cd)"),
+    ("gitx ws use work", "切换默认工作区 (多工作区: spaces / -s 名字 / drop)"),
     ("gitx release owner/repo", "交互式挑选并下载 Release 附件"),
     ("gitx publish", "发行版管理: 列表 / 创建 / 上传附件 / 编辑 / 删除"),
     ("gitx sync", "先拉取再推送, 一步完成日常同步 (默认变基)"),
@@ -2048,6 +2057,241 @@ def _proxy_uninstall(local: bool) -> None:
     cfg.pop("installed_scope", None)
     config.save(cfg)
     console.done("已移除 insteadOf 规则")
+
+
+# ================================================================ 工作区 (克隆 + 统一管理)
+
+ws_app = typer.Typer(help="工作区: 克隆 GitHub 项目到指定目录, 并统一管理所有已克隆的仓库", rich_markup_mode="rich",
+                     invoke_without_command=True, context_settings={"help_option_names": ["-h", "--help"]})
+
+
+@ws_app.callback()
+def _ws_root(
+    ctx: typer.Context,
+    space: Annotated[str, typer.Option("--space", "-s", help="操作哪个工作区 (缺省 = 默认)")] = "",
+) -> None:
+    # 不带子命令 = 列出工作区 (`gitx ws <链接>` 由 dispatch 改写成 gitx ws clone)
+    ctx.obj = {"space": space}  # 子命令未显式给 -s 时沿用这里的值
+    if ctx.invoked_subcommand is None:
+        workspace.list_repos(_ws_space(ctx, space))
+
+
+def _ws_space(ctx: typer.Context, flag: str) -> str:
+    """本次生效的工作区名: 子命令的 -s > 组级 -s > GITX_WS_SPACE > 默认."""
+    if flag:
+        return flag
+    carried = (ctx.obj or {}).get("space") if isinstance(ctx.obj, dict) else ""
+    return str(carried or workspace.space_name())
+
+
+@ws_app.command("list")
+def ws_list(
+    ctx: typer.Context,
+    space: Annotated[str, typer.Option("--space", "-s", help="操作哪个工作区 (缺省 = 默认)")] = "",
+) -> None:
+    """列出工作区里的全部仓库 (状态 / 分支 / 领先落后 / 最新提交)."""
+    workspace.list_repos(_ws_space(ctx, space))
+
+
+@ws_app.command("clone")
+def ws_clone(
+    ctx: typer.Context,
+    target: Annotated[str, typer.Argument(metavar="仓库|链接", help="owner/repo 或 GitHub 链接")],
+    dest: Annotated[str, typer.Argument(metavar="[目录]", help="克隆到哪个目录; 已存在的目录视为父目录")] = "",
+    depth: Annotated[int | None, typer.Option("--depth", "-d", help="克隆深度, 0 = 完整克隆")] = None,
+    branch: Annotated[str, typer.Option("--branch", "-b", help="指定分支")] = "",
+    submodules: Annotated[bool, typer.Option("--submodules", help="连同子模组一起拉取")] = False,
+    root_override: Annotated[str, typer.Option("--root", help="本次使用的工作区根目录")] = "",
+    name: Annotated[str, typer.Option("--name", "-n", help="清单里的名字 (默认取仓库名)")] = "",
+    proxy: Annotated[str | None, typer.Option("--proxy", help="本次加速源")] = None,
+    no_proxy: Annotated[bool, typer.Option("--no-proxy", help="本次直连")] = False,
+    space: Annotated[str, typer.Option("--space", "-s", help="登记到哪个工作区 (缺省 = 默认)")] = "",
+) -> None:
+    """克隆并登记一个仓库 (显式写法, 等价 gitx ws <仓库>)."""
+    workspace.clone(target, dest, depth=depth, branch=branch, proxy=proxy, no_proxy=no_proxy,
+                    submodules=submodules, name=name, root_override=root_override,
+                    space=_ws_space(ctx, space))
+
+
+@ws_app.command("add")
+def ws_add(
+    ctx: typer.Context,
+    paths: Annotated[list[str], typer.Argument(metavar="目录...", help="已有本地克隆的目录")],
+    name: Annotated[str, typer.Option("--name", "-n", help="清单里的名字 (仅单个目录时有效)")] = "",
+    space: Annotated[str, typer.Option("--space", "-s", help="登记到哪个工作区 (缺省 = 默认)")] = "",
+) -> None:
+    """把已有的本地克隆登记进工作区."""
+    for path in paths:
+        workspace.register_path(path, name=name if len(paths) == 1 else "",
+                                space=_ws_space(ctx, space))
+
+
+@ws_app.command("rm")
+def ws_rm(
+    ctx: typer.Context,
+    names: Annotated[list[str], typer.Argument(metavar="名字...", help="要移除的仓库 (名字 / owner/repo / 路径)")],
+    delete: Annotated[bool, typer.Option("--delete", help="连本地目录一起删掉")] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="删除目录时跳过确认")] = False,
+    space: Annotated[str, typer.Option("--space", "-s", help="操作哪个工作区 (缺省 = 默认)")] = "",
+) -> None:
+    """从工作区移除仓库 (默认只移出清单, 不动文件)."""
+    workspace.remove(list(names), delete=delete, yes=yes, space=_ws_space(ctx, space))
+
+
+@ws_app.command("status")
+def ws_status(
+    ctx: typer.Context,
+    names: Annotated[list[str] | None, typer.Argument(metavar="[名字...]", help="缺省 = 全部")] = None,
+    all_: Annotated[bool, typer.Option("--all", "-a", help="全部仓库")] = False,
+    space: Annotated[str, typer.Option("--space", "-s", help="操作哪个工作区 (缺省 = 默认)")] = "",
+) -> None:
+    """逐个仓库看改动与领先 / 落后."""
+    workspace.status(list(names or []), all_=all_, space=_ws_space(ctx, space))
+
+
+@ws_app.command("sync")
+def ws_sync(
+    ctx: typer.Context,
+    names: Annotated[list[str] | None, typer.Argument(metavar="[名字...]", help="缺省 = 全部")] = None,
+    all_: Annotated[bool, typer.Option("--all", "-a", help="全部仓库")] = False,
+    jobs: Annotated[int, typer.Option("--jobs", "-j", help="并行个数 (仅 fetch 阶段; 1 = 顺序)")] = 1,
+    proxy: Annotated[str | None, typer.Option("--proxy", help="本次加速源")] = None,
+    no_proxy: Annotated[bool, typer.Option("--no-proxy", help="本次直连")] = False,
+    space: Annotated[str, typer.Option("--space", "-s", help="操作哪个工作区 (缺省 = 默认)")] = "",
+) -> None:
+    """逐个拉取 (fetch + 变基), 工作区有改动的仓库只 fetch 不合并."""
+    workspace.sync(list(names or []), pull=True, all_=all_, proxy=proxy, no_proxy=no_proxy,
+                   jobs=jobs, space=_ws_space(ctx, space))
+
+
+@ws_app.command("fetch")
+def ws_fetch(
+    ctx: typer.Context,
+    names: Annotated[list[str] | None, typer.Argument(metavar="[名字...]", help="缺省 = 全部")] = None,
+    all_: Annotated[bool, typer.Option("--all", "-a", help="全部仓库")] = False,
+    jobs: Annotated[int, typer.Option("--jobs", "-j", help="并行个数 (1 = 顺序)")] = 1,
+    proxy: Annotated[str | None, typer.Option("--proxy", help="本次加速源")] = None,
+    no_proxy: Annotated[bool, typer.Option("--no-proxy", help="本次直连")] = False,
+    space: Annotated[str, typer.Option("--space", "-s", help="操作哪个工作区 (缺省 = 默认)")] = "",
+) -> None:
+    """只更新远端跟踪引用, 不改工作区."""
+    workspace.sync(list(names or []), pull=False, all_=all_, proxy=proxy, no_proxy=no_proxy,
+                   jobs=jobs, space=_ws_space(ctx, space))
+
+
+@ws_app.command("info")
+def ws_info(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument(metavar="名字", help="仓库名 / owner/repo / 路径")],
+    space: Annotated[str, typer.Option("--space", "-s", help="操作哪个工作区 (缺省 = 默认)")] = "",
+) -> None:
+    """看某个仓库的概览 (同 gitx info)."""
+    workspace.info(name, space=_ws_space(ctx, space))
+
+
+@ws_app.command("path")
+def ws_path(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument(metavar="名字", help="仓库名 / owner/repo / 路径")],
+    space: Annotated[str, typer.Option("--space", "-s", help="操作哪个工作区 (缺省 = 默认)")] = "",
+) -> None:
+    """只打印绝对路径 (cd "$(gitx ws path x)")."""
+    console.print(workspace.resolve_path(name, space=_ws_space(ctx, space)))
+
+
+@ws_app.command("cd")
+def ws_cd(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument(metavar="名字", help="仓库名 / owner/repo / 路径")],
+    shell: Annotated[bool, typer.Option("--shell", help="输出 cd 命令 (供 eval 使用)")] = False,
+    space: Annotated[str, typer.Option("--space", "-s", help="操作哪个工作区 (缺省 = 默认)")] = "",
+) -> None:
+    """打印仓库路径与进入方法 (子进程不能改父 shell 的目录)."""
+    target = workspace.resolve_path(name, space=_ws_space(ctx, space))
+    if shell:
+        console.print(f'cd "{target}"')
+        return
+    console.print(target)
+    console.hint(f'进入: cd "{target}"   |   或 eval "$(gitx ws cd {name} --shell)"')
+
+
+@ws_app.command("each", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def ws_each(
+    ctx: typer.Context,
+    command: Annotated[list[str], typer.Argument(metavar="命令...", help="要在每个仓库里执行的命令")],
+    names: Annotated[list[str] | None, typer.Option("--name", "-n", help="只在这些仓库里执行 (可重复)")] = None,
+    all_: Annotated[bool, typer.Option("--all", "-a", help="全部仓库")] = False,
+    space: Annotated[str, typer.Option("--space", "-s", help="操作哪个工作区 (缺省 = 默认)")] = "",
+) -> None:
+    """在每个仓库目录里执行同一条命令."""
+    workspace.each(list(command), list(names or []), all_=all_, space=_ws_space(ctx, space))
+
+
+@ws_app.command("find")
+def ws_find(
+    ctx: typer.Context,
+    keyword: Annotated[str, typer.Argument(metavar="关键词", help="按名字 / owner/repo / 路径搜")],
+    space: Annotated[str, typer.Option("--space", "-s", help="操作哪个工作区 (缺省 = 默认)")] = "",
+) -> None:
+    """在工作区里按关键词找仓库."""
+    workspace.find(keyword, space=_ws_space(ctx, space))
+
+
+@ws_app.command("root")
+def ws_root_cmd(
+    ctx: typer.Context,
+    path: Annotated[str | None, typer.Argument(metavar="[目录]", help="新的工作区根目录; 留空 = 查看")] = None,
+    space: Annotated[str, typer.Option("--space", "-s", help="操作哪个工作区 (缺省 = 默认)")] = "",
+) -> None:
+    """查看或设置某个工作区的根目录 (缺省 = 默认工作区)."""
+    chosen = _ws_space(ctx, space)
+    if path:
+        workspace.set_root(path, chosen)
+    else:
+        console.info(f"工作区 {chosen} 的根目录: {workspace.root(chosen)}")
+
+
+@ws_app.command("prune")
+def ws_prune(
+    ctx: typer.Context,
+    space: Annotated[str, typer.Option("--space", "-s", help="操作哪个工作区 (缺省 = 默认)")] = "",
+) -> None:
+    """清理清单里目录已不存在的项."""
+    workspace.prune(_ws_space(ctx, space))
+
+
+@ws_app.command("use")
+def ws_use(
+    name: Annotated[str | None, typer.Argument(
+        metavar="[名字]", help="要设为默认的工作区 (不存在就新建); 留空 = 看当前默认")] = None,
+    path: Annotated[str, typer.Option("--root", help="顺带设置/修改它的根目录")] = "",
+) -> None:
+    """切换默认工作区 (之后不带 -s 的命令都作用在它上面; 不存在则新建)."""
+    if not name:
+        chosen, item = workspace.get_space(required=True)
+        console.info(f"默认工作区: {chosen} ({item['root']}, {len(item['repos'])} 个仓库)")
+        console.hint("切换: gitx ws use <名字>   |   全部工作区: gitx ws spaces")
+        return
+    workspace.use(name, path)
+
+
+@ws_app.command("spaces")
+def ws_spaces() -> None:
+    """列出所有工作区 (默认的标出来)."""
+    workspace.list_spaces()
+
+
+@ws_app.command("drop")
+def ws_drop(
+    name: Annotated[str, typer.Argument(metavar="名字", help="要删除的工作区")],
+    delete: Annotated[bool, typer.Option("--delete", help="连它管理的仓库目录一起删掉")] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="跳过确认")] = False,
+) -> None:
+    """删除工作区 (默认只删清单记录, 不动目录)."""
+    workspace.drop_space(name, delete=delete, yes=yes)
+
+
+app.add_typer(ws_app, name="ws", rich_help_panel=PANEL_DL)
 
 
 # ================================================================ 配置

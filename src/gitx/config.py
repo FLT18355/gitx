@@ -21,6 +21,7 @@ DEFAULTS: dict[str, object] = {
     "depth": 1,               # 克隆深度
     "branch": "",             # 默认分支
     "dest": "",               # 默认下载目录
+    "workspace": "",          # 工作区根目录 (gitx ws)
     "resume": True,           # 断点续传
     "message": "日常同步更新",  # push 默认提交信息
     "sync_rebase": True,      # gitx sync 默认变基
@@ -44,6 +45,7 @@ _COMMENTS: dict[str, str] = {
     "depth": "克隆深度: 1 = 浅克隆(快), 0 = 完整克隆(带全部历史)",
     "branch": "下载时未指定分支则用它; 留空 = 探测远端默认分支(main/master)",
     "dest": "默认下载目录 (支持 ~ ); 留空 = 当前目录",
+    "workspace": "工作区根目录 (gitx ws 克隆与统一管理); 留空 = ~/gitx-workspaces",
     "resume": "断点续传: true 时中断的下载留下 .part, 重跑接着下",
     "message": "gitx push / sync 不带备注时用的提交信息",
     "sync_rebase": "gitx sync 先拉再推时用变基(true)还是合并(false)",
@@ -234,6 +236,7 @@ def _dump(data: dict) -> str:
     groups = [
         ("加速", ("proxy", "release_proxy")),
         ("下载", ("depth", "branch", "dest", "resume")),
+        ("工作区", ("workspace",)),
         ("同步", ("message", "sync_rebase")),
         ("API 与缓存", ("token", "cache", "cache_ttl")),
         ("性能", ("daemon", "daemon_idle")),

@@ -39,7 +39,7 @@ SUBCOMMANDS = frozenset({
 # 只接管自家子命令的命令: 其余参数 (gitx remote -v / gitx submodule foreach) 仍透传 git
 # gitx ws 的子命令; 其余第一个参数视为要克隆的仓库 (gitx ws owner/repo -> ws clone owner/repo)
 _WS_SUBS = frozenset({"list", "ls", "clone", "add", "rm", "remove", "status", "sync", "fetch", "info",
-                      "path", "cd", "each", "find", "root", "prune", "use", "spaces", "drop"})
+                      "path", "cd", "each", "find", "root", "prune", "use", "spaces", "drop", "move"})
 
 _PARTIAL = {
     "remote": frozenset({"list", "add", "remove", "rename", "set-url", "show"}),

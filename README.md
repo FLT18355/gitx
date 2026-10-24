@@ -97,10 +97,14 @@ gitx ws find <关键词>                    # 按名字 / owner/repo / 路径找
 gitx ws rm <名字...> [--delete] [-y]     # 移出清单 (--delete 连目录一起删)
 gitx ws prune                           # 清理目录已不存在的清单项
 gitx ws root [目录]                      # 查看 / 设置当前工作区的根目录
-gitx ws use <名字> [--root 目录]         # 切换默认工作区 (不存在就新建, 之后所有命令都作用在它上面)
+gitx ws use <名字> [目录]                # 切换默认工作区 (不存在就新建; 目录可放在任何位置)
+gitx ws move <新目录>                    # 把当前工作区整个搬过去 (仓库一起搬, 清单路径同步改)
 gitx ws spaces                          # 列出所有工作区 (默认的标出来)
 gitx ws drop <名字> [--delete]           # 删除工作区 (--delete 连仓库目录一起删)
 ```
+
+根目录**不限于** `~/gitx-workspaces`: 建的时候直接给目录, 例如 `gitx ws use work ~/code/work`
+或 `gitx ws use work /data/repos`; 已有工作区用 `gitx ws move ~/code` 搬走 (登记在别处的外部仓库不搬)。
 
 **默认工作区**: 可以同时有多个工作区 (比如 `work` / `oss`), 每个有自己的根目录和仓库清单;
 `gitx ws use work` 之后, 不带 `-s` 的命令都作用在 `work` 上。临时换一个用 `-s 名字`:
@@ -109,8 +113,9 @@ gitx ws drop <名字> [--delete]           # 删除工作区 (--delete 连仓库
 
 名字默认取仓库名, 重名自动加后缀 (`repo-2`) 不会互相覆盖; 清单在 `~/.config/gitx/workspaces.json`,
 纯本地状态 —— 删掉只丢清单, 不动任何仓库; 旧版单工作区清单读取时自动升级。
-新工作区的根目录默认是 `~/gitx-workspaces/<名字>` (默认工作区是 `~/gitx-workspaces`,
-可用 `gitx config set workspace <目录>` 改), 单次克隆还可以 `--root` 临时指定。
+新工作区的根目录默认是 `~/gitx-workspaces/<名字>` (默认工作区是 `~/gitx-workspaces`);
+`gitx ws use <名字> <目录>` / `gitx ws root <目录>` / `gitx config set workspace <目录>` 都能改,
+单次克隆还可以 `--root` 临时指定。
 克隆同样走加速, 失败会自动清掉半截目录。
 
 ### 下载 Release 附件(通过 API, 默认加速)

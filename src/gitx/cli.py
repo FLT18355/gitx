@@ -66,7 +66,8 @@ _EPILOG = """[key]示例[/key]
   gitx actions download -D 产物目录                   下载运行产物 (附件)
   gitx auth                                         看登录了哪些账号 (当前账号标出来)
   gitx auth token --save                            复用 gh 的令牌, 把 API 限额提到 5000 次/小时
-  gitx ws use work                                  切换默认工作区 -> ~/gitx-workspaces/work
+  gitx ws use work ~/code/work                      切换默认工作区, 根目录随你放 (任意路径)
+  gitx ws move ~/code                               把当前工作区整个搬过去 (仓库一起搬)
   gitx ws -s oss list                               临时看另一个工作区
   gitx ws -h                                        工作区全部子命令 (list / add / rm / spaces / drop)
   gitx repos                                       上下键挑我的仓库 -> 进编辑界面 (改描述 / 话题 / 可见性)
@@ -117,7 +118,7 @@ def _version_callback(value: bool) -> None:
 _WELCOME_TIPS: tuple[tuple[str, str], ...] = (
     ("gitx <链接|owner/repo>", "下载仓库 / 文件夹 / 文件 / 源码包 (默认加速)"),
     ("gitx ws owner/repo", "克隆到工作区并统一管理 (status / sync / each / cd)"),
-    ("gitx ws use work", "切换默认工作区 (多工作区: spaces / -s 名字 / drop)"),
+    ("gitx ws use work ~/code", "切换默认工作区, 根目录随你放 (多工作区: spaces / move)"),
     ("gitx release owner/repo", "交互式挑选并下载 Release 附件"),
     ("gitx publish", "发行版管理: 列表 / 创建 / 上传附件 / 编辑 / 删除"),
     ("gitx sync", "先拉取再推送, 一步完成日常同步 (默认变基)"),
@@ -2264,15 +2265,31 @@ def ws_prune(
 def ws_use(
     name: Annotated[str | None, typer.Argument(
         metavar="[名字]", help="要设为默认的工作区 (不存在就新建); 留空 = 看当前默认")] = None,
-    path: Annotated[str, typer.Option("--root", help="顺带设置/修改它的根目录")] = "",
+    path: Annotated[str, typer.Argument(
+        metavar="[目录]", help="工作区根目录 (任意位置, 不必在 ~ 下); 已存在的工作区会改根目录")] = "",
+    root: Annotated[str, typer.Option("--root", help="同上 (等价写法)")] = "",
 ) -> None:
-    """切换默认工作区 (之后不带 -s 的命令都作用在它上面; 不存在则新建)."""
+    """切换默认工作区 (之后不带 -s 的命令都作用在它上面; 不存在则新建).
+
+    根目录可以放在任何地方: [key]gitx ws use work ~/code[/key] / [key]gitx ws use work /data/repos[/key];
+    只给名字时才是 ~/gitx-workspaces/<名字>。
+    """
     if not name:
         chosen, item = workspace.get_space(required=True)
         console.info(f"默认工作区: {chosen} ({item['root']}, {len(item['repos'])} 个仓库)")
-        console.hint("切换: gitx ws use <名字>   |   全部工作区: gitx ws spaces")
+        console.hint("切换: gitx ws use <名字> [目录]   |   全部工作区: gitx ws spaces")
         return
-    workspace.use(name, path)
+    workspace.use(name, root or path)
+
+
+@ws_app.command("move")
+def ws_move(
+    ctx: typer.Context,
+    dest: Annotated[str, typer.Argument(metavar="新目录", help="工作区的新根目录 (任意位置)")],
+    space: Annotated[str, typer.Option("--space", "-s", help="操作哪个工作区 (缺省 = 默认)")] = "",
+) -> None:
+    """把工作区整个搬到别处 (仓库目录一起搬, 清单里的路径同步更新)."""
+    workspace.move(dest, space=_ws_space(ctx, space))
 
 
 @ws_app.command("spaces")
@@ -2330,6 +2347,9 @@ def config_set(
         value = config.normalize(key, value)
     except ValueError as exc:
         console.error(str(exc))
+    if key == "workspace":  # 工作区根目录的真源在清单里, 这里转交给它 (顺带同步配置)
+        workspace.set_root(str(value) or workspace.DEFAULT_ROOT)
+        return
     config.save({**config.load(), key: value})
     console.done(f"{key} = {_mask(key, value)}")
 

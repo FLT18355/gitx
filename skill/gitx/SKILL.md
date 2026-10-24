@@ -89,7 +89,8 @@ gitx sync                            # 同步当前仓库
 | `gitx ws each <命令...>` | 每个仓库都跑一遍同一条命令 |
 | `gitx ws path` / `cd <名字>` | 绝对路径 / 进入方法（`--shell` 输出 `cd`，可 `eval`） |
 | `gitx ws find` / `rm` / `prune` / `root` | 查找 / 移出清单（`--delete` 删目录）/ 清理失效项 / 当前工作区根目录 |
-| `gitx ws use <名字> [--root 目录]` | 切换默认工作区（不存在就新建），之后所有 `ws` 命令都作用在它上面 |
+| `gitx ws use <名字> [目录]` | 切换默认工作区（不存在就新建；根目录可放在任意位置） |
+| `gitx ws move <新目录>` | 把当前工作区整个搬走（仓库一起搬，清单路径同步更新） |
 | `gitx ws spaces` / `drop <名字>` | 列出所有工作区 / 删除工作区（`--delete` 连目录） |
 | `gitx ws -s <名字> ...` / `GITX_WS_SPACE` | 临时对另一个工作区操作 |
 

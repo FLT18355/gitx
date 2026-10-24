@@ -82,10 +82,6 @@ def normalize(data: object) -> dict:
         if chosen not in spaces:
             chosen = next(iter(spaces), DEFAULT_SPACE)
         spaces.setdefault(DEFAULT_SPACE, {"root": _default_root(), "repos": {}})
-        # 配置项 workspace 是"默认工作区根目录"的镜像: 手改配置文件也能生效
-        configured = str(config.load().get("workspace") or "").strip()
-        if configured and chosen in spaces:
-            spaces[chosen]["root"] = os.path.abspath(os.path.expanduser(configured))
         return {"version": 2, "default": chosen, "spaces": spaces}
     repos = data.get("repos")
     old = {str(k): v for k, v in repos.items() if isinstance(v, dict)} if isinstance(repos, dict) else {}
@@ -107,11 +103,17 @@ def load_registry() -> dict:
 
 
 def save_registry(data: dict) -> None:
+    """写清单, 并把"默认工作区根目录"同步进配置项 workspace (两处永远一致)."""
+    normalized = normalize(data)
     path = registry_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(normalize(data), ensure_ascii=False, indent=2), "utf-8")
+    default_root = str(normalized["spaces"][normalized["default"]]["root"])
+    tmp.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), "utf-8")
     tmp.replace(path)
+    cfg = config.load()
+    if str(cfg.get("workspace") or "") != default_root:
+        config.save({**cfg, "workspace": default_root})
 
 
 def space_name(flag: str = "") -> str:
@@ -154,8 +156,6 @@ def set_root(path: str, name: str = "") -> None:
     data = load_registry()
     data["spaces"][chosen]["root"] = value
     save_registry(data)
-    if chosen == data["default"]:
-        config.save({**config.load(), "workspace": value})  # 同步到配置文件, 便于查看
     console.done(f"工作区 {chosen} 的根目录: {value}")
 
 
@@ -193,10 +193,47 @@ def use(name: str, dir_: str = "") -> None:
     data["default"] = name
     save_registry(data)
     info = spaces[name]
-    # 默认工作区的根目录同步进配置, `gitx config` 里能直接看到
-    if str(config.load().get("workspace") or "") != info["root"]:
-        config.save({**config.load(), "workspace": info["root"]})
     console.done(f"默认工作区: {name} ({info['root']}, {len(info['repos'])} 个仓库)")
+
+
+def move(dest: str, *, space: str = "") -> None:
+    """把某个工作区的整个目录搬到新位置 (仓库路径一起更新, 外置登记的目录不动)."""
+    chosen = space_name(space)
+    data = load_registry()
+    current = _ensure(data, chosen)
+    old_root = str(current["root"])
+    new_root = os.path.abspath(os.path.expanduser(dest))
+    if new_root == os.path.abspath(old_root):
+        console.info(f"工作区 {chosen} 已经在这里: {new_root}")
+        return
+    os.makedirs(new_root, exist_ok=True)
+    moved = skipped = 0
+    for key, item in current["repos"].items():
+        path = str(item.get("path") or "")
+        if not os.path.isdir(path):
+            skipped += 1
+            continue
+        try:
+            inside = os.path.commonpath([os.path.abspath(old_root), os.path.abspath(path)]) \
+                == os.path.abspath(old_root)
+        except ValueError:
+            inside = False
+        if not inside:  # 登记在别处的仓库: 保留原路径, 只改工作区根目录
+            skipped += 1
+            continue
+        target = os.path.join(new_root, os.path.relpath(path, old_root))
+        if os.path.exists(target):
+            console.warn(f"目标已存在, 跳过 {key}: {target}")
+            skipped += 1
+            continue
+        os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
+        shutil.move(path, target)
+        item["path"] = os.path.abspath(target)
+        moved += 1
+    current["root"] = new_root
+    save_registry(data)
+    console.done(f"工作区 {chosen} 已搬到 {new_root} (移动 {moved} 个仓库"
+                 + (f", 跳过 {skipped} 个)" if skipped else ")"))
 
 
 def list_spaces() -> None:
@@ -228,8 +265,6 @@ def drop_space(name: str, *, delete: bool = False, yes: bool = False) -> None:
     data["spaces"].pop(name, None)
     if data["default"] == name:
         data["default"] = next(iter(data["spaces"]))
-        fallback = data["spaces"][data["default"]]["root"]
-        config.save({**config.load(), "workspace": fallback})
     save_registry(data)
     console.done(f"已删除工作区 {name}" + (" (目录已删除)" if delete else " (目录保留)"))
     console.info(f"默认工作区: {data['default']}")

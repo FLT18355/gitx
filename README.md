@@ -331,11 +331,11 @@ gitx repos delete owner/repo -y       # 删除 (不可恢复, 需要 delete_repo
 | `repos archive` / `repos unarchive` | 归档 / 取消归档 | |
 | `repos sync` | 与源仓库对齐 | `-s` 源仓库, `-b` 分支, `--force` |
 | `repos star` / `repos unstar` | 收藏 / 取消收藏 | |
-| `repos starred` / `repos stars` | 浏览收藏的仓库: ↑↓ 挑一个, 越过已加载的最后一条自动取下一页 | `-n` 每页条数 (默认 10), `-o` 看别人公开收藏, `--sort created\|updated`, `--order asc\|desc`, `-l` 表格, `--all` 全部, `--json`, `--fresh` |
+| `repos starred` | 浏览收藏的仓库: ↑↓ 挑一个, 越过已加载的最后一条自动取下一页 | `-n` 每页条数 (默认 10), `-o` 看别人公开收藏, `--sort created\|updated`, `--order asc\|desc`, `-l` 表格, `--all` 全部, `--json`, `--fresh` |
 | `repos set-default` | 设为当前目录的默认仓库 | |
 | `repos delete` | 删除仓库 | `-y` 跳过确认 |
 
-**收藏浏览** (`gitx repos starred` / `repos stars`) 默认每次只向 GitHub 取 `-n` 个 (10 个),
+**收藏浏览** (`gitx repos starred`) 默认每次只向 GitHub 取 `-n` 个 (10 个),
 用 ↑↓ 挑; 光标继续向下越过已加载的最后一条时会自动再取下一批, 所以收藏几千个也能立刻打开。
 挑中后可克隆 / 登记到工作区 / 看概览 / 打开网页 / 取消收藏 (取消后立刻从列表消失, 可接着浏览)。
 `-l` 直接出表格, `--all` 一直翻页到取完, `--json` 给脚本, `-o` 看别人公开的收藏。

@@ -1595,7 +1595,6 @@ def repos_sync(
 
 
 @repos_app.command("starred")
-@repos_app.command("stars")
 def repos_starred(
     limit: Annotated[int, typer.Option(
         "--limit", "-n", help="每次加载几条 (最多 100; 继续按下键再取下一批; 表格模式 = 显示前几个)")] = 10,

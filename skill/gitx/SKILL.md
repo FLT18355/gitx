@@ -162,7 +162,7 @@ gitx sync                            # 同步当前仓库
 | `gitx repos archive\|unarchive [owner/repo]` | 归档 / 取消归档 |
 | `gitx repos sync [owner/repo] [-s 源] [-b 分支] [--force]` | 与上游 / 源仓库对齐 |
 | `gitx repos star\|unstar [owner/repo]` | 收藏 / 取消收藏 |
-| `gitx repos starred\|stars [-n 10]` | **浏览收藏**：↑↓ 挑一个，光标越过已加载的最后一条时自动向 GitHub 取下一批 10 个；挑中后可克隆 / 登记到工作区 / 看概览 / 打开网页 / 取消收藏。`-o` 看别人公开收藏，`--sort created\|updated`，`--order asc\|desc`，`-l` 表格，`--all` 全部，`--json`，`--fresh` |
+| `gitx repos starred [-n 10]` | **浏览收藏**：↑↓ 挑一个，光标越过已加载的最后一条时自动向 GitHub 取下一批 10 个；挑中后可克隆 / 登记到工作区 / 看概览 / 打开网页 / 取消收藏。`-o` 看别人公开收藏，`--sort created\|updated`，`--order asc\|desc`，`-l` 表格，`--all` 全部，`--json`，`--fresh` |
 | `gitx repos set-default [owner/repo]` | 设为当前目录的默认仓库 |
 | `gitx repos delete [owner/repo] [-y]` | 删除仓库（不可恢复，需要 delete_repo 权限） |
 

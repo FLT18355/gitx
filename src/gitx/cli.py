@@ -135,6 +135,7 @@ _WELCOME_TIPS: tuple[tuple[str, str], ...] = (
     ("gitx actions", "Actions 运行: 列表 / 日志 / 重跑 / 产物下载 (交给 gh)"),
     ("gitx auth", "登录状态 / 切换账号 / 取令牌 (--save 提升 API 限额)"),
     ("gitx repos", "挑/搜我的仓库 (-q 关键词) -> 进编辑界面改设置 (结果走缓存, --fresh 回源)"),
+    ("gitx repos starred", "浏览收藏: 每 10 个一页, 继续按下键自动加载下一批"),
     ("gitx daemon", "守护进程: 低配机提速 (config set daemon true 打开)"),
     ("gitx cache", "缓存: 查看 / 明细 / 清理 ~/.cache/gitx"),
     ("gitx upgrade", "自更新到最新版本 (下载走加速)"),
@@ -1593,6 +1594,37 @@ def repos_sync(
     ghrepo.sync(_pick_target(target, "sync"), source=source, branch=branch, force=force)
 
 
+@repos_app.command("starred")
+@repos_app.command("stars")
+def repos_starred(
+    limit: Annotated[int, typer.Option(
+        "--limit", "-n", help="每次加载几条 (最多 100; 继续按下键再取下一批; 表格模式 = 显示前几个)")] = 10,
+    owner: Annotated[str, typer.Option("--owner", "-o", help="看谁的收藏 (缺省 = 自己)")] = "",
+    sort: Annotated[str, typer.Option("--sort", help="排序: created (收藏时间) / updated (更新时间)")] = "created",
+    order: Annotated[str, typer.Option("--order", help="顺序: desc / asc")] = "desc",
+    list_: Annotated[bool, typer.Option("--list", "-l", help="用表格列出, 不进交互界面")] = False,
+    all_: Annotated[bool, typer.Option("--all", "-a", help="配合 --list: 一直翻页, 列出全部收藏")] = False,
+    json_out: Annotated[bool, typer.Option("--json", help="输出 JSON (脚本友好)")] = False,
+    fresh: Annotated[bool, typer.Option("--fresh", help="不吃本地缓存, 重新向 GitHub 取一次")] = False,
+) -> None:
+    """浏览我收藏 (star) 的仓库: 上下键挑一个, 光标越过已加载的最后一条会自动加载下一批.
+
+    默认每次向 GitHub 取 [num]-n[/num] 个 (10 个); 继续按下键越过第 10 条时才取下一页,
+    所以收藏上千个也能立刻开始浏览。挑中后可 [key]克隆 / 登记到工作区 / 看概览 / 打开网页 / 取消收藏[/key]。
+    [key]-o[/key] 看别人的公开收藏, [key]-l[/key] 直接列表, [key]--json[/key] 给脚本用。
+    """
+    if sort not in ghrepo.STARRED_SORTS:
+        console.error(f"不支持的排序: {sort} (可选: {', '.join(ghrepo.STARRED_SORTS)})")
+    # 与其它 repos 子命令一致: `gitx repos -o cli starred` / `gitx repos --fresh starred` 也生效
+    owner = owner or str(_PICK.get("owner") or "")
+    fresh = fresh or _fresh()
+    if all_ or list_ or json_out:
+        ghrepo.starred_list(count=limit, owner=owner, sort=sort, order=order,
+                            all_pages=all_, fresh=fresh, json_out=json_out)
+        return
+    ghrepo.starred_shell(owner=owner, page_size=limit, sort=sort, order=order, fresh=fresh)
+
+
 @repos_app.command("star")
 def repos_star(target: Annotated[str, typer.Argument(metavar="[仓库]", help=_REPO_ARG)] = "") -> None:
     """收藏仓库 (别人的也行: gitx repos star cli/cli)."""
@@ -2171,13 +2203,15 @@ def ws_fetch(
     names: Annotated[list[str] | None, typer.Argument(metavar="[名字...]", help="缺省 = 全部")] = None,
     all_: Annotated[bool, typer.Option("--all", "-a", help="全部仓库")] = False,
     jobs: Annotated[int, typer.Option("--jobs", "-j", help="并行个数 (1 = 顺序)")] = 1,
+    fetch_only: Annotated[bool, typer.Option(
+        "--fetch-only", help="只更新远端跟踪引用, 不合并 (旧版 fetch 的行为)")] = False,
     proxy: Annotated[str | None, typer.Option("--proxy", help="本次加速源")] = None,
     no_proxy: Annotated[bool, typer.Option("--no-proxy", help="本次直连")] = False,
     space: Annotated[str, typer.Option("--space", "-s", help="操作哪个工作区 (缺省 = 默认)")] = "",
 ) -> None:
-    """只更新远端跟踪引用, 不改工作区."""
-    workspace.sync(list(names or []), pull=False, all_=all_, proxy=proxy, no_proxy=no_proxy,
-                   jobs=jobs, space=_ws_space(ctx, space))
+    """逐个拉取最新提交 (git pull); 工作区有改动 / 无上游的仓库只 fetch 不合并."""
+    workspace.sync(list(names or []), pull=True, all_=all_, proxy=proxy, no_proxy=no_proxy,
+                   jobs=jobs, space=_ws_space(ctx, space), fetch_only=fetch_only)
 
 
 @ws_app.command("info")

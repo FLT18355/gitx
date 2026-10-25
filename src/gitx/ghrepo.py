@@ -12,6 +12,7 @@
   gitx repos archive/unarchive [仓库]  归档 / 取消归档
   gitx repos sync [仓库]            与上游 (或 --source) 同步
   gitx repos star/unstar [仓库]     收藏 / 取消收藏
+  gitx repos starred                浏览收藏: 上下键挑, 越过已加载的最后一条自动取下一页
   gitx repos set-default [仓库]     设为当前目录的默认仓库
   gitx repos delete [仓库]          删除 (会确认)
 
@@ -244,6 +245,198 @@ def fetch_repo(target: str, *, fresh: bool = False) -> dict:
         console.error("仓库数据异常, 请稍后重试")
     _remember(key, repo)
     return repo
+
+
+# ---------------------------------------------------------------- 收藏 (starred)
+
+_STARRED_PREFIX = f"{_PREFIX}starred:"
+STARRED_SORTS = ("created", "updated")  # created = 按收藏时间, updated = 按仓库更新时间
+
+
+def _normalize_starred(item: dict, *, mine: bool = True) -> dict:
+    """把 REST /user/starred 的一条结果翻成仓库表格 / 编辑界面认的形状.
+
+    mine=False 是别人的公开收藏, 不能标成"已收藏"(那是别人的行为)。
+    """
+    lang = str(item.get("language") or "")
+    visibility = "private" if item.get("private") else str(item.get("visibility") or "public").lower()
+    topics = item.get("topics") or []
+    return {
+        "nameWithOwner": str(item.get("full_name") or ""),
+        "description": item.get("description") or "",
+        "visibility": visibility,
+        "isPrivate": bool(item.get("private")),
+        "isFork": bool(item.get("fork")),
+        "isArchived": bool(item.get("archived")),
+        "isTemplate": bool(item.get("is_template")),
+        "viewerHasStarred": mine,
+        "stargazerCount": int(item.get("stargazers_count") or 0),
+        "primaryLanguage": {"name": lang} if lang else None,
+        "repositoryTopics": [{"name": str(topic)} for topic in topics],
+        "homepageUrl": item.get("homepage") or "",
+        "defaultBranchRef": {"name": str(item.get("default_branch"))}
+        if item.get("default_branch") else None,
+        "updatedAt": item.get("updated_at") or "",
+        "pushedAt": item.get("pushed_at") or "",
+        "url": item.get("html_url") or f"https://github.com/{item.get('full_name') or ''}",
+    }
+
+
+def starred_page(page: int = 1, count: int = 10, *, owner: str = "", sort: str = "created",
+                 order: str = "desc", fresh: bool = False) -> list[dict]:
+    """收藏的第 page 页 (每页 count 个); owner 非空 = 看别人公开的收藏.
+
+    REST 分页而不是"一次拉完": 交互界面每次只取 10 个, 用户继续按下键才取下一页。
+    """
+    if sort not in STARRED_SORTS:
+        console.error(f"不支持的排序: {sort} (可选: {', '.join(STARRED_SORTS)})")
+    if order not in ("asc", "desc"):
+        console.error(f"不支持的顺序: {order} (可选: asc, desc)")
+    page = max(1, int(page))
+    count = max(1, min(100, int(count)))
+    key = f"{_STARRED_PREFIX}{owner or '@me'}:{sort}:{order}:{page}:{count}"
+    hit = _recall(key, fresh=fresh)
+    if isinstance(hit, list):
+        return hit
+    gh = _gh()
+    endpoint = f"users/{owner}/starred" if owner else "user/starred"
+    args = ["api", f"{endpoint}?per_page={count}&page={page}"
+                   f"&sort={sort}&direction={order}"]
+    data = ghcli.json_out(gh, args, "读取收藏的仓库")
+    if not isinstance(data, list):
+        console.error("收藏数据异常, 请稍后重试")
+    repos = [_normalize_starred(item, mine=not owner) for item in data if isinstance(item, dict)]
+    _remember(key, repos)
+    return repos
+
+
+def starred_list(*, count: int = 10, owner: str = "", sort: str = "created",
+                 order: str = "desc", all_pages: bool = False, fresh: bool = False,
+                 json_out: bool = False) -> None:
+    """列出收藏的仓库 (表格 / JSON); all_pages 时一直翻页到取完."""
+    where = f"{owner} 的" if owner else "我的"
+    count = max(1, min(100, int(count)))
+    if not json_out:
+        console.step(f"正在取{where}收藏" + ("" if all_pages else f" (前 {count} 个)") + " ...")
+    per_page = 100 if all_pages else count
+    repos: list[dict] = []
+    page = 1
+    while True:
+        batch = starred_page(page, per_page, owner=owner, sort=sort, order=order,
+                             fresh=fresh and page == 1)
+        repos.extend(batch)
+        if not all_pages or len(batch) < per_page:
+            break
+        page += 1
+    if json_out:
+        import json
+
+        console.print(json.dumps(repos, ensure_ascii=False, indent=2),
+                      soft_wrap=True, markup=False, highlight=False)
+        return
+    if not repos:
+        console.info(f"{where}收藏 0 个\n提示: 收藏一个仓库: gitx repos star <owner/repo>")
+        return
+    title = f"{where}收藏 {len(repos)} 个 (按{'收藏' if sort == 'created' else '更新'}时间{'升序' if order == 'asc' else '降序'})"
+    _repo_table(repos, title)
+    if not all_pages:
+        console.info("继续加载/看更多: gitx repos starred -l -n 30 或 --all   |   上下键浏览: gitx repos starred")
+
+
+# 收藏浏览界面的动作: (代号, 说明)
+_STARRED_ACTIONS: tuple[tuple[str, str], ...] = (
+    ("clone", "克隆到本地 (公开走加速 / 私有交给 gh)"),
+    ("workspace", "克隆并登记到工作区 (gitx ws)"),
+    ("stat", "看仓库概览 (star / 语言 / 贡献者)"),
+    ("web", "打开仓库网页"),
+    ("unstar", "取消收藏"),
+    ("quit", "退出收藏浏览"),
+)
+
+
+def _starred_label(repo: dict) -> str:
+    """收藏列表的一行: 仓库 (状态) —— 与仓库挑选器的标签同形, 不带序号."""
+    return f"{repo.get('nameWithOwner') or ''}  ({_state(repo)})"
+
+
+def starred_shell(*, owner: str = "", page_size: int = 10, sort: str = "created",
+                  order: str = "desc", fresh: bool = False) -> None:
+    """收藏浏览: 上下键挑仓库, 光标越过第 10 条时自动向 GitHub 取下一批 10 条.
+
+    挑中后可克隆 / 登记到工作区 / 看概览 / 打开网页 / 取消收藏; 取消收藏后列表里
+    立刻消失, 可以继续浏览。
+    """
+    if not console.is_terminal():
+        console.error("浏览收藏需要交互终端\n提示: 非交互请用 gitx repos starred -l (表格)")
+    page_size = max(1, min(100, int(page_size)))
+    loaded: list[dict] = []
+    seen: set[str] = set()
+    state = {"page": 1, "done": False, "fresh": fresh}
+
+    def fetch(offset: int, count: int) -> list[dict]:
+        while len(loaded) < offset + count and not state["done"]:
+            batch = starred_page(state["page"], page_size, owner=owner, sort=sort,
+                                 order=order, fresh=bool(state["fresh"]))
+            state["fresh"] = False
+            state["page"] += 1
+            if not batch:
+                state["done"] = True
+                break
+            added = 0
+            for repo in batch:
+                nwo = str(repo.get("nameWithOwner") or "")
+                if nwo and nwo not in seen:
+                    seen.add(nwo)
+                    loaded.append(repo)
+                    added += 1
+            if len(batch) < page_size:
+                state["done"] = True
+            elif not added:
+                continue  # 整页都是已看过的 (取消收藏后分页会挪位), 继续下一页
+        return loaded[offset:offset + count]
+
+    while True:
+        if not loaded and state["done"]:
+            console.info(f"{owner or '我的'}收藏 0 个\n提示: 收藏一个仓库: gitx repos star <owner/repo>")
+            return
+        repo = console.select_stream(
+            f"收藏的仓库 ({owner or '我的'}; 每页 {page_size} 个, 继续按下键加载更多)",
+            fetch, page_size=page_size, label=_starred_label,
+            instruction="[↑↓] 选择 (继续按下键加载更多)  [回车] 确认")
+        if repo is None:
+            console.warn("已退出收藏浏览")
+            return
+        nwo = str(repo.get("nameWithOwner") or "")
+        choice = console.select(f"{nwo} 要做什么?", [label for _, label in _STARRED_ACTIONS],
+                                instruction="[↑↓] 选择  [回车] 确认")
+        if choice is None:
+            console.warn("已退出收藏浏览")
+            return
+        action = _STARRED_ACTIONS[choice][0]
+        if action == "quit":
+            console.info("已退出收藏浏览")
+            return
+        if action == "clone":
+            clone(nwo)
+        elif action == "workspace":
+            from . import workspace
+
+            workspace.clone(nwo)
+        elif action == "stat":
+            from . import hub
+
+            hub.stat(nwo, config.active_proxy())
+        elif action == "web":
+            view(nwo, web=True)
+        elif action == "unstar":
+            if not console.ask(f"取消收藏 {nwo}?", default=True):
+                console.warn("已取消")
+                continue
+            star(nwo, on=False)
+            loaded[:] = [item for item in loaded if item.get("nameWithOwner") != nwo]
+            seen.discard(nwo)
+            if not loaded and not state["done"]:
+                state["page"] = 1  # 列表被取消收藏掏空 -> 从头再取一页
 
 
 # ---------------------------------------------------------------- 挑选 / 表格

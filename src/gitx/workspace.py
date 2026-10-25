@@ -5,7 +5,7 @@
   gitx ws                          列出工作区里的全部仓库 (状态 / 分支 / 领先落后)
   gitx ws list|ls                  同上
   gitx ws sync [名字...]            逐个 fetch + 变基拉取 (拉取走加速)
-  gitx ws fetch [名字...]           只更新远端跟踪引用
+  gitx ws fetch [名字...]           逐个 git pull (--fetch-only 只更新远端跟踪引用)
   gitx ws status [名字...]          逐个仓库的改动明细
   gitx ws info <名字>               单个仓库概览 (复用 gitx info)
   gitx ws path <名字>               打印绝对路径 (可 cd "$(gitx ws path x)")
@@ -525,6 +525,30 @@ def find(keyword: str, *, space: str = "") -> None:
 
 # ---------------------------------------------------------------- 同步
 
+def _canonicalize_remote(item: dict) -> None:
+    """把"克隆时烧进 URL 的镜像前缀"还原成直连地址.
+
+    旧版本克隆会把 `https://v4.gh-proxy.org/https://github.com/...` 存成 origin:
+    之后 fetch / pull 永远打那个镜像 (换源、--no-proxy 都无效, 镜像缓存旧时看起来
+    "fetch 了却没有新提交")。改成直连后, 加速由每条 git 命令的 -c insteadOf 临时提供。
+    """
+    path = str(item.get("path") or "")
+    remote = config.default_remote()
+    # 用 config 读"存储的 URL": remote get-url 会套上 insteadOf, 看起来永远像加速地址
+    rc, url = gitcmd.capture(["git", "-C", path, "config", "--get", f"remote.{remote}.url"])
+    if rc != 0:
+        return
+    if not url.startswith(("http://", "https://")) or url.startswith("https://github.com/"):
+        return
+    parsed = github.owner_repo(url)
+    if not parsed:
+        return
+    direct = github.repo_clone_url(*parsed)
+    if direct != url:
+        subprocess.run(["git", "-C", path, "remote", "set-url", remote, direct],
+                       check=False, capture_output=True)
+
+
 def _fetch_or_pull(item: dict, prefix: str | None, *, pull: bool) -> tuple[str, str]:
     """返回 (状态, 说明); 不抛异常, 单个失败不影响其余."""
     path = str(item.get("path") or "")
@@ -532,6 +556,7 @@ def _fetch_or_pull(item: dict, prefix: str | None, *, pull: bool) -> tuple[str, 
         return "缺失", path
     if not gitcmd.remote_url(config.default_remote(), path):
         return "无远程", path
+    _canonicalize_remote(item)
     if not gitcmd.fetch_remote(path, prefix=prefix):
         return "失败", "fetch 失败 (可 --no-proxy 直连)"
     if not pull:
@@ -548,17 +573,19 @@ def _fetch_or_pull(item: dict, prefix: str | None, *, pull: bool) -> tuple[str, 
 
 def sync(names: list[str], *, pull: bool = True, all_: bool = False,
          proxy: str | None = None, no_proxy: bool = False, jobs: int = 1,
-         space: str = "") -> None:
+         space: str = "", fetch_only: bool = False) -> None:
+    """pull=True 时逐个 `git pull`; fetch_only=True 时只更新远端引用 (旧行为)."""
     picked = _select(names, all_=all_ or not names, space_name_=space)
     prefix = config.active_proxy(proxy, no_proxy)
-    console.step(f"{'同步' if pull else '更新'} {len(picked)} 个仓库"
+    do_pull = pull and not fetch_only
+    console.step(f"{'同步' if do_pull else '更新'} {len(picked)} 个仓库"
                  + (" [加速]" if prefix else ""))
     results: list[tuple[str, str, str]] = []
     if jobs > 1 and len(picked) > 1 and hasattr(os, "fork"):
-        results = _parallel(picked, prefix, pull, jobs)
+        results = _parallel(picked, prefix, do_pull, jobs)
     else:
         for key, item in picked:
-            results.append((key, *_fetch_or_pull(item, prefix, pull=pull)))
+            results.append((key, *_fetch_or_pull(item, prefix, pull=do_pull)))
     table = console.table("名称", "结果", "说明")
     bad = 0
     for key, state, detail in results:

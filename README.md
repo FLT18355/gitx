@@ -6,6 +6,12 @@
 > 发版步骤在 `doc/发布流程.md`, 给 AI agent 的命令速查在 `skill/gitx/SKILL.md`。
 > AI / 协作者请**只读当前任务相关的那一份**, 不要为了"了解全貌"把文档全读一遍。
 
+> **v1.1.0-pre2: 收藏浏览 + 工作区拉取修正** ——
+> ④ **`gitx repos starred`**: 浏览收藏的仓库, 每次只取 10 个, 光标越过最后一条时自动加载下一批;
+> 挑中后可克隆 / 登记到工作区 / 看概览 / 打开网页 / 取消收藏 (表格与 `--json` 也支持);
+> ⑤ **`gitx ws fetch` 改为逐个 `git pull`** (`--fetch-only` 保留旧的"只更新远端引用"),
+> 并修正克隆把镜像地址烧进 origin、导致之后 fetch 换源失效 / 看起来"没有新提交"的问题。
+>
 > **v1.1.0-pre1: 短链接 + repos 提速** ——
 > ① **`gitx owner/repo` 直接下载**: 不用再打 `https://github.com/`, 形如 `gitx cli/cli` 即可
 > (本地真有同名路径时仍按相对路径交给 git, 不会被截走);
@@ -90,7 +96,7 @@ gitx ws add ~/code/已有克隆             # 把已有仓库登记进来 (从 o
 gitx ws | gitx ws list                 # 总览: 分支 / 改动 / 领先落后 / 最近提交 / 路径
 gitx ws status [名字...]                # 逐个看改动与上游
 gitx ws sync [名字...] [-j 4]           # 逐个 fetch + 变基拉取 (有改动的仓库只 fetch)
-gitx ws fetch [名字...]                 # 只更新远端跟踪引用
+gitx ws fetch [名字...] [-j 4]          # 同上: 逐个 git pull; --fetch-only 只更新远端引用
 gitx ws each git status -s              # 每个仓库都跑一遍同一条命令
 gitx ws path <名字> | gitx ws cd <名字>  # 取绝对路径 / 进入方法 (--shell 供 eval)
 gitx ws find <关键词>                    # 按名字 / owner/repo / 路径找
@@ -304,6 +310,10 @@ gitx repos rename owner/repo 新名字    # 改名 (新名字留空会问一次)
 gitx repos archive owner/repo         # 归档 (unarchive 取消归档)
 gitx repos sync owner/repo -s 上游/仓库  # 与上游 / 源仓库对齐 (--force 硬对齐)
 gitx repos star cli/cli               # 收藏 (unstar 取消收藏)
+gitx repos starred                   # 浏览收藏: ↑↓ 挑, 跨过第 10 条才向 GitHub 取下一批 10 条
+gitx repos starred -l -n 30          # 表格列出前 30 个收藏 (--all 一直翻页到取完)
+gitx repos starred -o cli            # 看别人公开的收藏
+gitx repos starred --sort updated --json   # 按更新时间排序, 输出 JSON 给脚本
 gitx repos set-default owner/repo     # 设为当前目录的默认仓库 (之后少写 -R)
 gitx repos delete owner/repo -y       # 删除 (不可恢复, 需要 delete_repo 权限)
 ```
@@ -321,8 +331,14 @@ gitx repos delete owner/repo -y       # 删除 (不可恢复, 需要 delete_repo
 | `repos archive` / `repos unarchive` | 归档 / 取消归档 | |
 | `repos sync` | 与源仓库对齐 | `-s` 源仓库, `-b` 分支, `--force` |
 | `repos star` / `repos unstar` | 收藏 / 取消收藏 | |
+| `repos starred` / `repos stars` | 浏览收藏的仓库: ↑↓ 挑一个, 越过已加载的最后一条自动取下一页 | `-n` 每页条数 (默认 10), `-o` 看别人公开收藏, `--sort created\|updated`, `--order asc\|desc`, `-l` 表格, `--all` 全部, `--json`, `--fresh` |
 | `repos set-default` | 设为当前目录的默认仓库 | |
 | `repos delete` | 删除仓库 | `-y` 跳过确认 |
+
+**收藏浏览** (`gitx repos starred` / `repos stars`) 默认每次只向 GitHub 取 `-n` 个 (10 个),
+用 ↑↓ 挑; 光标继续向下越过已加载的最后一条时会自动再取下一批, 所以收藏几千个也能立刻打开。
+挑中后可克隆 / 登记到工作区 / 看概览 / 打开网页 / 取消收藏 (取消后立刻从列表消失, 可接着浏览)。
+`-l` 直接出表格, `--all` 一直翻页到取完, `--json` 给脚本, `-o` 看别人公开的收藏。
 
 编辑界面里的每一次修改都走 `gh repo edit`, 而且**只把变了的项组成参数**(描述改成原样不发请求,
 想清空就把那一项删干净再回车); 改可见性会先提示副作用(掉 star / 断掉复刻关系)并要求确认。

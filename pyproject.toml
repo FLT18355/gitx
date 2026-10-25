@@ -8,7 +8,7 @@ license-files = ["LICENSE"]
 authors = [
 { name = "FLT18355", email = "cm18750724707a@outlook.com" }
 ]
-requires-python = ">=3.14"
+requires-python = ">=3.11"
 dependencies = [
     "click>=8.5.0",
     "prompt-toolkit>=3.0.43",

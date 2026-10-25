@@ -23,8 +23,8 @@ from typing import Annotated
 import typer
 from rich.markup import escape
 
-from . import (__version__, accel, actions, auth, branch, cache, config, console, daemon, download, ghrepo,
-               gitcmd, github, hub, pr, publish, release, remote, repo, stash, submodule, sync, tag,
+from . import (__version__, accel, actions, auth, branch, cache, config, console, daemon, download, ghcli,
+               ghrepo, gitcmd, github, hub, pr, publish, release, remote, repo, stash, submodule, sync, tag,
                upgrade, workspace)
 
 PANEL_DL = "下载 (默认加速)"
@@ -38,6 +38,7 @@ PANEL_COLLAB = "协作 (PR / 子模组)"
 PANEL_ACT = "工作流 (Actions 运行)"
 PANEL_GHR = "我的仓库 (挑一个 -> 编辑)"
 PANEL_AUTH = "账号 (登录态)"
+PANEL_API = "GitHub API (gh api 直通)"
 PANEL_PROXY = "加速管理"
 PANEL_CONF = "配置与自检"
 
@@ -134,6 +135,7 @@ _WELCOME_TIPS: tuple[tuple[str, str], ...] = (
     ("gitx pr / gitx submodule", "PR 列表与详情 / 子模组一条龙 (走加速)"),
     ("gitx actions", "Actions 运行: 列表 / 日志 / 重跑 / 产物下载 (交给 gh)"),
     ("gitx auth", "登录状态 / 切换账号 / 取令牌 (--save 提升 API 限额)"),
+    ("gitx api", "直通 gh api: 默认看限额 (rate_limit), 也可查任意 REST / GraphQL 端点"),
     ("gitx repos", "挑/搜我的仓库 (-q 关键词) -> 进编辑界面改设置 (结果走缓存, --fresh 回源)"),
     ("gitx repos starred", "浏览收藏: 每 10 个一页, 继续按下键自动加载下一批"),
     ("gitx daemon", "守护进程: 低配机提速 (config set daemon true 打开)"),
@@ -1907,6 +1909,23 @@ def auth_setup_git(
 
 
 app.add_typer(auth_app, name="auth", rich_help_panel=PANEL_AUTH)
+
+
+@app.command("api", rich_help_panel=PANEL_API,
+             context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def api(ctx: typer.Context) -> None:
+    """直通 gh api: 任意 REST / GraphQL 端点, 参数原样转发.
+
+    不给参数 (或 [key]rate_limit[/key]) 时, 把限额渲染成中文表格: 资源 / 限额 / 已用 /
+    剩余 / 重置时间; 想看 gh 原始 JSON 就加 [key]--raw[/key]。
+    其它端点与 [key]--jq[/key] / [key]-X[/key] / [key]-f[/key] / [key]-H[/key] / [key]--paginate[/key] 等全部原样交给 gh:
+      [key]gitx api user[/key]                        看当前登录账号
+      [key]gitx api repos/cli/cli --jq .stargazers_count[/key]
+      [key]gitx api graphql -f query='{viewer{login}}'[/key]
+      [key]gitx api --paginate "user/repos?per_page=100"[/key]
+    未登录时先 [key]gitx auth login[/key]; 写操作权限按 gh 当前授权范围生效。
+    """
+    ghcli.api(list(ctx.args))
 
 
 app.add_typer(proxy_app, name="proxy", rich_help_panel=PANEL_PROXY)

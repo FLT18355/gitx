@@ -11,7 +11,8 @@
 > 挑中后可克隆 / 登记到工作区 / 看概览 / 打开网页 / 取消收藏 (表格与 `--json` 也支持);
 > ⑤ **`gitx ws fetch` 改为逐个 `git pull`** (`--fetch-only` 保留旧的"只更新远端引用"),
 > 并修正克隆把镜像地址烧进 origin、导致之后 fetch 换源失效 / 看起来"没有新提交"的问题;
-> 另修 `gitx push` 重复追加 pushurl、导致同一次推送做两遍 / 分支跟踪提示打印两次的问题。
+> 另修 `gitx push` 重复追加 pushurl、导致同一次推送做两遍 / 分支跟踪提示打印两次的问题;
+> ⑥ 新增 **`gitx api`**: 直通 `gh api` (默认看 `rate_limit`, 任意 REST / GraphQL 端点与参数原样转发)。
 >
 > **v1.1.0-pre1: 短链接 + repos 提速** ——
 > ① **`gitx owner/repo` 直接下载**: 不用再打 `https://github.com/`, 形如 `gitx cli/cli` 即可
@@ -276,6 +277,25 @@ gitx auth setup-git                       # 让 git 的 https 推送 / 拉取走
 
 登录 / 退出 / 切换 / 刷新都由 `gh` 自己做交互 (设备码、浏览器、SSH 密钥), gitx 原样透传它的输出;
 没登录时 `gitx auth` 给的是中文提示, 而不是 gh 的英文原文。
+
+### GitHub API (直通 gh api)
+
+`gitx api` 就是 `gh api`: 端点与所有选项**原样转发**, 鉴权、`--jq` / `-X` / `-f` / `-H` / `--paginate`
+都交给 gh。不带参数 (或 `rate_limit`) 时会把限额画成中文表格: 资源 / 限额 / 已用 / 剩余 / 重置时间;
+想看 gh 的原始 JSON 就加 `--raw`。
+
+```bash
+gitx api                                  # 中文限额表 (资源 / 已用 / 剩余 / 重置时间)
+gitx api rate_limit --raw                 # gh 的原始 JSON
+gitx api rate_limit                       # 同上
+gitx api user                             # 当前登录账号
+gitx api repos/cli/cli --jq .stargazers_count
+gitx api graphql -f query='{viewer{login}}'
+gitx api --paginate "user/repos?per_page=100"
+gitx api -X POST repos/owner/repo/issues -f title=标题   # 任意 REST / GraphQL 操作都支持
+```
+
+需要已登录 `gh` (`gitx auth login`); 写操作的权限按 gh 当前的授权范围生效。
 
 ### 我的仓库 (挑一个 -> 编辑界面, 交给已登录的 gh)
 

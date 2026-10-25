@@ -145,6 +145,15 @@ gitx sync                            # 同步当前仓库
 > 登录 / 退出 / 切换 / 刷新都由 `gh` 自己做交互（设备码 / 浏览器 / SSH 密钥），gitx 只透传输出；
 > 没登录时 `gitx auth` 给中文提示。`--hostname` 供 GitHub Enterprise 使用。
 
+### 🌐 GitHub API (直通 gh api)
+
+| 命令 | 说明 |
+|------|------|
+| `gitx api` | 直通 `gh api`；**不带参数 = `rate_limit`**，渲染成中文表格（资源 / 限额 / 已用 / 剩余 / 重置时间）；`--raw` 看 gh 原始 JSON |
+| `gitx api <端点> [gh api 参数...]` | 端点与 `--jq` / `-X` / `-f` / `-H` / `--paginate` 等全部原样转发；例：`gitx api user`、`gitx api repos/cli/cli -q .stargazers_count`、`gitx api graphql -f query='{viewer{login}}'` |
+
+> 鉴权用 `gh` 的登录态（`gitx auth login`）；写操作权限按 gh 当前授权范围生效。
+
 ### 🗂️ 我的仓库 (挑一个 → 编辑界面，交给 gh)
 
 | 命令 | 说明 |

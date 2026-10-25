@@ -10,7 +10,8 @@
 > ④ **`gitx repos starred`**: 浏览收藏的仓库, 每次只取 10 个, 光标越过最后一条时自动加载下一批;
 > 挑中后可克隆 / 登记到工作区 / 看概览 / 打开网页 / 取消收藏 (表格与 `--json` 也支持);
 > ⑤ **`gitx ws fetch` 改为逐个 `git pull`** (`--fetch-only` 保留旧的"只更新远端引用"),
-> 并修正克隆把镜像地址烧进 origin、导致之后 fetch 换源失效 / 看起来"没有新提交"的问题。
+> 并修正克隆把镜像地址烧进 origin、导致之后 fetch 换源失效 / 看起来"没有新提交"的问题;
+> 另修 `gitx push` 重复追加 pushurl、导致同一次推送做两遍 / 分支跟踪提示打印两次的问题。
 >
 > **v1.1.0-pre1: 短链接 + repos 提速** ——
 > ① **`gitx owner/repo` 直接下载**: 不用再打 `https://github.com/`, 形如 `gitx cli/cli` 即可

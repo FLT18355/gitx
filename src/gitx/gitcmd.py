@@ -281,14 +281,27 @@ def _push_override(path: str, remote: str) -> str | None:
     """URL 重写规则会把推送也重写到镜像(镜像不支持推送, 405).
 
     检测到这种情况时, 为本次推送临时改用 SSH 地址直连, 返回 -c 参数.
+
+    已有 pushurl 时返回 None: `-c remote.<name>.pushurl=...` 对多值配置是**追加**
+    而不是替换, 会得到两个 pushurl —— git 于是把同一次推送做两遍, 分支跟踪提示
+    也会打印两次 (gitx 克隆的仓库本来就带 SSH pushurl, 正好踩中)。
     """
     fetch = remote_url(remote, path)
     # fetch 可能是带加速前缀的地址, 用 search 提取末尾的 github 仓库路径
     m = re.search(r"https://github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$", fetch)
     if not m or not accel.installed_prefix(path=path):
         return None
+    if _push_urls(path, remote):
+        return None  # 已配置过推送地址: 尊重它, 不再追加
     owner, repo = m.group(1), m.group(2)
     return f"remote.{remote}.pushurl=git@github.com:{owner}/{repo}.git"
+
+
+def _push_urls(path: str, remote: str) -> list[str]:
+    """仓库里为这个远程配置的 pushurl 列表 (可能有多个)."""
+    rc, out = capture(["git", "-C", path, "config", "--get-all",
+                       f"remote.{remote}.pushurl"])
+    return [line for line in out.splitlines() if line.strip()] if rc == 0 else []
 
 
 def push(path: str = ".", remote: str = "origin", branch: str = "", force: bool = False, upstream: bool = True) -> bool:

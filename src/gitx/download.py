@@ -97,6 +97,14 @@ def _download_repo(info: dict, dest: str, prefix: str | None, depth: int, branch
     if submodules:
         console.info("子模组已一并拉取 (同样走加速)")
     if prefix:
+        # 克隆地址带了镜像前缀, 但远程 URL 必须落成直连地址: 否则以后 fetch / pull 会
+        # 永远走"克隆时那一个"镜像 (配置换源 / --no-proxy 都不生效, 镜像缓存旧时还会
+        # 看起来"fetch 了但没有新提交"). 加速统一由每条命令的 -c insteadOf 临时提供。
+        subprocess.run(
+            ["git", "-C", dest, "remote", "set-url", "origin", direct_url],
+            check=False,
+            capture_output=True,
+        )
         # 镜像不支持推送: 推送地址走 SSH(有全局加速规则时)或直连 https
         push_url = gitcmd.github_push_url(direct_url, dest)
         subprocess.run(

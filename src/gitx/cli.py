@@ -23,8 +23,8 @@ from typing import Annotated
 import typer
 from rich.markup import escape
 
-from . import (__version__, accel, actions, auth, branch, cache, config, console, daemon, download, ghrepo,
-               gitcmd, github, hub, pr, publish, release, remote, repo, stash, submodule, sync, tag,
+from . import (__version__, accel, actions, auth, branch, cache, config, console, daemon, download, ghcli,
+               ghrepo, gitcmd, github, hub, pr, publish, release, remote, repo, stash, submodule, sync, tag,
                upgrade, workspace)
 
 PANEL_DL = "下载 (默认加速)"
@@ -38,6 +38,7 @@ PANEL_COLLAB = "协作 (PR / 子模组)"
 PANEL_ACT = "工作流 (Actions 运行)"
 PANEL_GHR = "我的仓库 (挑一个 -> 编辑)"
 PANEL_AUTH = "账号 (登录态)"
+PANEL_API = "GitHub API (gh api 直通)"
 PANEL_PROXY = "加速管理"
 PANEL_CONF = "配置与自检"
 
@@ -66,7 +67,8 @@ _EPILOG = """[key]示例[/key]
   gitx actions download -D 产物目录                   下载运行产物 (附件)
   gitx auth                                         看登录了哪些账号 (当前账号标出来)
   gitx auth token --save                            复用 gh 的令牌, 把 API 限额提到 5000 次/小时
-  gitx ws use work                                  切换默认工作区 -> ~/gitx-workspaces/work
+  gitx ws use work ~/code/work                      切换默认工作区, 根目录随你放 (任意路径)
+  gitx ws move ~/code                               把当前工作区整个搬过去 (仓库一起搬)
   gitx ws -s oss list                               临时看另一个工作区
   gitx ws -h                                        工作区全部子命令 (list / add / rm / spaces / drop)
   gitx repos                                       上下键挑我的仓库 -> 进编辑界面 (改描述 / 话题 / 可见性)
@@ -117,7 +119,7 @@ def _version_callback(value: bool) -> None:
 _WELCOME_TIPS: tuple[tuple[str, str], ...] = (
     ("gitx <链接|owner/repo>", "下载仓库 / 文件夹 / 文件 / 源码包 (默认加速)"),
     ("gitx ws owner/repo", "克隆到工作区并统一管理 (status / sync / each / cd)"),
-    ("gitx ws use work", "切换默认工作区 (多工作区: spaces / -s 名字 / drop)"),
+    ("gitx ws use work ~/code", "切换默认工作区, 根目录随你放 (多工作区: spaces / move)"),
     ("gitx release owner/repo", "交互式挑选并下载 Release 附件"),
     ("gitx publish", "发行版管理: 列表 / 创建 / 上传附件 / 编辑 / 删除"),
     ("gitx sync", "先拉取再推送, 一步完成日常同步 (默认变基)"),
@@ -133,7 +135,9 @@ _WELCOME_TIPS: tuple[tuple[str, str], ...] = (
     ("gitx pr / gitx submodule", "PR 列表与详情 / 子模组一条龙 (走加速)"),
     ("gitx actions", "Actions 运行: 列表 / 日志 / 重跑 / 产物下载 (交给 gh)"),
     ("gitx auth", "登录状态 / 切换账号 / 取令牌 (--save 提升 API 限额)"),
+    ("gitx api", "直通 gh api: 默认看限额 (rate_limit), 也可查任意 REST / GraphQL 端点"),
     ("gitx repos", "挑/搜我的仓库 (-q 关键词) -> 进编辑界面改设置 (结果走缓存, --fresh 回源)"),
+    ("gitx repos starred", "浏览收藏: 每 10 个一页, 继续按下键自动加载下一批"),
     ("gitx daemon", "守护进程: 低配机提速 (config set daemon true 打开)"),
     ("gitx cache", "缓存: 查看 / 明细 / 清理 ~/.cache/gitx"),
     ("gitx upgrade", "自更新到最新版本 (下载走加速)"),
@@ -1592,6 +1596,36 @@ def repos_sync(
     ghrepo.sync(_pick_target(target, "sync"), source=source, branch=branch, force=force)
 
 
+@repos_app.command("starred")
+def repos_starred(
+    limit: Annotated[int, typer.Option(
+        "--limit", "-n", help="每次加载几条 (最多 100; 继续按下键再取下一批; 表格模式 = 显示前几个)")] = 10,
+    owner: Annotated[str, typer.Option("--owner", "-o", help="看谁的收藏 (缺省 = 自己)")] = "",
+    sort: Annotated[str, typer.Option("--sort", help="排序: created (收藏时间) / updated (更新时间)")] = "created",
+    order: Annotated[str, typer.Option("--order", help="顺序: desc / asc")] = "desc",
+    list_: Annotated[bool, typer.Option("--list", "-l", help="用表格列出, 不进交互界面")] = False,
+    all_: Annotated[bool, typer.Option("--all", "-a", help="配合 --list: 一直翻页, 列出全部收藏")] = False,
+    json_out: Annotated[bool, typer.Option("--json", help="输出 JSON (脚本友好)")] = False,
+    fresh: Annotated[bool, typer.Option("--fresh", help="不吃本地缓存, 重新向 GitHub 取一次")] = False,
+) -> None:
+    """浏览我收藏 (star) 的仓库: 上下键挑一个, 光标越过已加载的最后一条会自动加载下一批.
+
+    默认每次向 GitHub 取 [num]-n[/num] 个 (10 个); 继续按下键越过第 10 条时才取下一页,
+    所以收藏上千个也能立刻开始浏览。挑中后可 [key]克隆 / 登记到工作区 / 看概览 / 打开网页 / 取消收藏[/key]。
+    [key]-o[/key] 看别人的公开收藏, [key]-l[/key] 直接列表, [key]--json[/key] 给脚本用。
+    """
+    if sort not in ghrepo.STARRED_SORTS:
+        console.error(f"不支持的排序: {sort} (可选: {', '.join(ghrepo.STARRED_SORTS)})")
+    # 与其它 repos 子命令一致: `gitx repos -o cli starred` / `gitx repos --fresh starred` 也生效
+    owner = owner or str(_PICK.get("owner") or "")
+    fresh = fresh or _fresh()
+    if all_ or list_ or json_out:
+        ghrepo.starred_list(count=limit, owner=owner, sort=sort, order=order,
+                            all_pages=all_, fresh=fresh, json_out=json_out)
+        return
+    ghrepo.starred_shell(owner=owner, page_size=limit, sort=sort, order=order, fresh=fresh)
+
+
 @repos_app.command("star")
 def repos_star(target: Annotated[str, typer.Argument(metavar="[仓库]", help=_REPO_ARG)] = "") -> None:
     """收藏仓库 (别人的也行: gitx repos star cli/cli)."""
@@ -1875,6 +1909,23 @@ def auth_setup_git(
 
 
 app.add_typer(auth_app, name="auth", rich_help_panel=PANEL_AUTH)
+
+
+@app.command("api", rich_help_panel=PANEL_API,
+             context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def api(ctx: typer.Context) -> None:
+    """直通 gh api: 任意 REST / GraphQL 端点, 参数原样转发.
+
+    不给参数 (或 [key]rate_limit[/key]) 时, 把限额渲染成中文表格: 资源 / 限额 / 已用 /
+    剩余 / 重置时间; 想看 gh 原始 JSON 就加 [key]--raw[/key]。
+    其它端点与 [key]--jq[/key] / [key]-X[/key] / [key]-f[/key] / [key]-H[/key] / [key]--paginate[/key] 等全部原样交给 gh:
+      [key]gitx api user[/key]                        看当前登录账号
+      [key]gitx api repos/cli/cli --jq .stargazers_count[/key]
+      [key]gitx api graphql -f query='{viewer{login}}'[/key]
+      [key]gitx api --paginate "user/repos?per_page=100"[/key]
+    未登录时先 [key]gitx auth login[/key]; 写操作权限按 gh 当前授权范围生效。
+    """
+    ghcli.api(list(ctx.args))
 
 
 app.add_typer(proxy_app, name="proxy", rich_help_panel=PANEL_PROXY)
@@ -2170,13 +2221,15 @@ def ws_fetch(
     names: Annotated[list[str] | None, typer.Argument(metavar="[名字...]", help="缺省 = 全部")] = None,
     all_: Annotated[bool, typer.Option("--all", "-a", help="全部仓库")] = False,
     jobs: Annotated[int, typer.Option("--jobs", "-j", help="并行个数 (1 = 顺序)")] = 1,
+    fetch_only: Annotated[bool, typer.Option(
+        "--fetch-only", help="只更新远端跟踪引用, 不合并 (旧版 fetch 的行为)")] = False,
     proxy: Annotated[str | None, typer.Option("--proxy", help="本次加速源")] = None,
     no_proxy: Annotated[bool, typer.Option("--no-proxy", help="本次直连")] = False,
     space: Annotated[str, typer.Option("--space", "-s", help="操作哪个工作区 (缺省 = 默认)")] = "",
 ) -> None:
-    """只更新远端跟踪引用, 不改工作区."""
-    workspace.sync(list(names or []), pull=False, all_=all_, proxy=proxy, no_proxy=no_proxy,
-                   jobs=jobs, space=_ws_space(ctx, space))
+    """逐个拉取最新提交 (git pull); 工作区有改动 / 无上游的仓库只 fetch 不合并."""
+    workspace.sync(list(names or []), pull=True, all_=all_, proxy=proxy, no_proxy=no_proxy,
+                   jobs=jobs, space=_ws_space(ctx, space), fetch_only=fetch_only)
 
 
 @ws_app.command("info")
@@ -2264,15 +2317,31 @@ def ws_prune(
 def ws_use(
     name: Annotated[str | None, typer.Argument(
         metavar="[名字]", help="要设为默认的工作区 (不存在就新建); 留空 = 看当前默认")] = None,
-    path: Annotated[str, typer.Option("--root", help="顺带设置/修改它的根目录")] = "",
+    path: Annotated[str, typer.Argument(
+        metavar="[目录]", help="工作区根目录 (任意位置, 不必在 ~ 下); 已存在的工作区会改根目录")] = "",
+    root: Annotated[str, typer.Option("--root", help="同上 (等价写法)")] = "",
 ) -> None:
-    """切换默认工作区 (之后不带 -s 的命令都作用在它上面; 不存在则新建)."""
+    """切换默认工作区 (之后不带 -s 的命令都作用在它上面; 不存在则新建).
+
+    根目录可以放在任何地方: [key]gitx ws use work ~/code[/key] / [key]gitx ws use work /data/repos[/key];
+    只给名字时才是 ~/gitx-workspaces/<名字>。
+    """
     if not name:
         chosen, item = workspace.get_space(required=True)
         console.info(f"默认工作区: {chosen} ({item['root']}, {len(item['repos'])} 个仓库)")
-        console.hint("切换: gitx ws use <名字>   |   全部工作区: gitx ws spaces")
+        console.hint("切换: gitx ws use <名字> [目录]   |   全部工作区: gitx ws spaces")
         return
-    workspace.use(name, path)
+    workspace.use(name, root or path)
+
+
+@ws_app.command("move")
+def ws_move(
+    ctx: typer.Context,
+    dest: Annotated[str, typer.Argument(metavar="新目录", help="工作区的新根目录 (任意位置)")],
+    space: Annotated[str, typer.Option("--space", "-s", help="操作哪个工作区 (缺省 = 默认)")] = "",
+) -> None:
+    """把工作区整个搬到别处 (仓库目录一起搬, 清单里的路径同步更新)."""
+    workspace.move(dest, space=_ws_space(ctx, space))
 
 
 @ws_app.command("spaces")
@@ -2330,6 +2399,9 @@ def config_set(
         value = config.normalize(key, value)
     except ValueError as exc:
         console.error(str(exc))
+    if key == "workspace":  # 工作区根目录的真源在清单里, 这里转交给它 (顺带同步配置)
+        workspace.set_root(str(value) or workspace.DEFAULT_ROOT)
+        return
     config.save({**config.load(), key: value})
     console.done(f"{key} = {_mask(key, value)}")
 

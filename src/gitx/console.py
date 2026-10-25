@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import contextlib
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, NoReturn
 
 from rich.console import Console
@@ -369,6 +369,113 @@ def _picker(multi: bool, message: str, labels: Sequence[str], instruction: str,
 def select(message: str, labels: Sequence[str], *, instruction: str = "") -> int | None:
     """上下键单选, 直接打字即筛选; 返回下标, 中断返回 None."""
     return _picker(False, message, labels, instruction)
+
+
+_STREAM_MORE = object()  # 翻页选择器末尾的"继续加载"占位项
+
+
+def select_stream(message: str, fetch: Callable[[int, int], Sequence[Any]], *,
+                  page_size: int = 10, label: Callable[[Any], str] = str,
+                  instruction: str = "") -> Any | None:
+    """上下键单选 + 按需翻页: 光标越过已加载的最后一条时自动再取一页.
+
+    fetch(offset, count) 返回下一批 (返回空 / 不足一批 = 到底了). 列表末尾会多一条
+    "↓ 继续加载更多": 选中它 (= 继续按下键) 就调用 fetch 取下一批, 因此列表很大时
+    不必一次拉完, 也不会为了"看看后面是什么"而多等一趟网络。
+    """
+    import questionary
+    from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
+    from prompt_toolkit.keys import Keys
+    from prompt_toolkit.layout.dimension import LayoutDimension
+    from questionary.prompts.common import Choice, InquirerControl
+
+    items: list[Any] = []
+    exhausted = False
+
+    def fetch_page() -> int:
+        nonlocal exhausted
+        batch = list(fetch(len(items), page_size))
+        if not batch:
+            exhausted = True
+            return 0
+        items.extend(batch)
+        if len(batch) < page_size:
+            exhausted = True
+        return len(batch)
+
+    if not fetch_page():
+        return None
+
+    def choice(index: int) -> Any:
+        return Choice(title=label(items[index]), value=index)
+
+    choices = [choice(i) for i in range(len(items))]
+    if not exhausted:
+        choices.append(Choice(title="↓ 继续加载更多 ...", value=_STREAM_MORE))
+
+    question = questionary.select(
+        message, choices=choices, instruction=instruction or "[↑↓] 选择  [回车] 确认",
+        style=questionary.Style(picker_style()),
+        use_search_filter=False, use_jk_keys=False, show_description=False,
+    )
+    control = window = None
+    for win in question.application.layout.find_all_windows():
+        if isinstance(win.content, InquirerControl):
+            control, window = win.content, win
+            break
+    if control is None:  # 理论上不会发生; 退化成一次性选择
+        index = question.ask()
+        return None if index is None else items[index]
+
+    def resize() -> None:
+        window.height = LayoutDimension.exact(min(len(control.choices), MAX_VISIBLE))
+
+    def load_more(event: Any) -> None:
+        old = len(items)
+        if fetch_page():
+            new = [choice(i) for i in range(old, len(items))]
+            if control.choices and control.choices[-1].value is _STREAM_MORE:
+                control.choices[-1:-1] = new
+            else:
+                control.choices.extend(new)
+            control.pointed_at = old
+        if exhausted and control.choices and control.choices[-1].value is _STREAM_MORE:
+            control.choices.pop()
+        control.pointed_at = max(0, min(control.pointed_at, len(control.choices) - 1))
+        resize()
+        event.app.invalidate()
+
+    def move(step: int) -> None:
+        control.pointed_at = max(0, min(len(control.choices) - 1, control.pointed_at + step))
+
+    bindings = KeyBindings()
+
+    @bindings.add(Keys.Down, eager=True)
+    @bindings.add(Keys.ControlN, eager=True)
+    def _down(event: Any) -> None:
+        move(1)
+        if control.choices[control.pointed_at].value is _STREAM_MORE:
+            load_more(event)
+
+    @bindings.add(Keys.Up, eager=True)
+    @bindings.add(Keys.ControlP, eager=True)
+    def _up(_event: Any) -> None:
+        move(-1)
+
+    @bindings.add(Keys.ControlM, eager=True)
+    def _enter(event: Any) -> None:
+        value = control.choices[control.pointed_at].value
+        if value is _STREAM_MORE:
+            load_more(event)
+            return
+        control.is_answered = True
+        event.app.exit(result=value)
+
+    resize()
+    question.application.key_bindings = merge_key_bindings(
+        [question.application.key_bindings, bindings])  # 后注册者优先 (prompt_toolkit 取 matches[-1])
+    index = question.ask()  # Ctrl+C -> None
+    return None if index is None else items[index]
 
 
 def check(message: str, labels: Sequence[str], *, instruction: str = "",

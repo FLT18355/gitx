@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import time
 
 from . import console, gitcmd, github
 
@@ -55,6 +56,101 @@ def run(path: str, args: list[str], action: str) -> None:
     """跑一条 gh 命令并透传它自己的输出; 失败时补一句中文提示."""
     if subprocess.run([path, *args]).returncode != 0:
         console.error(f"{action}失败 (gh 已打印原因)")
+
+
+def api(args: list[str]) -> None:
+    """直通 gh api; 不带参数 / rate_limit 时渲染成中文限额表, --raw 看原始 JSON."""
+    gh = require("调用 GitHub API")
+    raw = "--raw" in args
+    args = [arg for arg in args if arg != "--raw"]
+    if not args:
+        args = ["rate_limit"]
+    if not raw and args in (["rate_limit"], ["/rate_limit"]):
+        code, out, err = capture(gh, ["api", "rate_limit"])
+        if code != 0:
+            console.error(f"读取 API 限额失败\n{err}" if err else "读取 API 限额失败")
+        try:
+            data = json.loads(out)
+        except json.JSONDecodeError:
+            data = None
+        if isinstance(data, dict) and _render_rate_limit(data):
+            return
+        console.warn("限额数据格式不认识, 改为打印原始输出")
+        console.print(out)
+        return
+    run(gh, ["api", *args], "调用 GitHub API")
+
+
+# 限额资源的显示名 (GitHub 返回的 key -> 中文); 没列到的原样显示
+_RATE_NAMES = {
+    "core": "核心 REST",
+    "search": "搜索",
+    "graphql": "GraphQL",
+    "integration_manifest": "集成清单",
+    "source_import": "源码导入",
+    "code_search": "代码搜索",
+    "code_scanning_autofix": "代码扫描修复",
+    "code_scanning_upload": "代码扫描上传",
+    "actions_runner_registration": "Actions Runner 注册",
+    "scim": "SCIM",
+    "dependency_snapshots": "依赖快照",
+    "dependency_sbom": "依赖 SBOM",
+    "audit_log": "审计日志",
+    "audit_log_streaming": "审计日志流",
+}
+_RATE_ORDER = ("core", "search", "graphql")
+
+
+def _reset_text(timestamp: int, now: float) -> str:
+    """epoch -> "10-25 15:30 (18 分钟后)" 这类人话."""
+    if timestamp <= 0:
+        return "-"
+    when = time.strftime("%m-%d %H:%M", time.localtime(timestamp))
+    left = int((timestamp - now) // 60)
+    if timestamp <= now:
+        return f"{when} (已重置)"
+    if left <= 0:
+        return f"{when} (即将重置)"
+    if left < 60:
+        return f"{when} ({left} 分钟后)"
+    return f"{when} ({left // 60} 小时 {left % 60} 分后)"
+
+
+def _render_rate_limit(data: dict) -> bool:
+    """把 /rate_limit 的 JSON 画成用户看得懂的表格; 结构不对返回 False."""
+    resources = data.get("resources")
+    if not isinstance(resources, dict) or not resources:
+        return False
+    keys = [key for key in _RATE_ORDER if key in resources]
+    keys += sorted(key for key in resources if key not in _RATE_ORDER)
+    table = console.table("资源", "限额", "已用", "剩余", "重置时间", title="GitHub API 限额")
+    now = time.time()
+    for key in keys:
+        info = resources.get(key)
+        if not isinstance(info, dict):
+            continue
+        limit = int(info.get("limit") or 0)
+        used = int(info.get("used") or 0)
+        remaining = int(info.get("remaining") or 0)
+        reset = int(info.get("reset") or 0)
+        if limit < 0:  # GitHub 用 -1 表示不限
+            limit_text, used_text, remain_text = "不限", "-", "-"
+        else:
+            pct = f" ({remaining * 100 // limit}%)" if limit else ""
+            limit_text, used_text, remain_text = str(limit), str(used), f"{remaining}{pct}"
+        table.add_row(
+            console.txt(_RATE_NAMES.get(key, key)),
+            console.txt(limit_text),
+            console.txt(used_text),
+            console.txt(remain_text),
+            console.txt(_reset_text(reset, now)),
+        )
+    console.print(table)
+    core = resources.get("core")
+    if isinstance(core, dict) and 0 < int(core.get("limit") or 0) <= 60:
+        console.info("当前是低限额 (60 次/小时): 运行 gitx auth token --save 可提升到 5000 次/小时")
+    console.hint("原始 JSON: gitx api rate_limit --raw   |   单看某一块: gitx api rate_limit --jq .resources.core")
+    return True
 
 
 def capture(path: str, args: list[str]) -> tuple[int, str, str]:

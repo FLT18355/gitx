@@ -5,7 +5,7 @@
   gitx ws                          列出工作区里的全部仓库 (状态 / 分支 / 领先落后)
   gitx ws list|ls                  同上
   gitx ws sync [名字...]            逐个 fetch + 变基拉取 (拉取走加速)
-  gitx ws fetch [名字...]           只更新远端跟踪引用
+  gitx ws fetch [名字...]           逐个 git pull (--fetch-only 只更新远端跟踪引用)
   gitx ws status [名字...]          逐个仓库的改动明细
   gitx ws info <名字>               单个仓库概览 (复用 gitx info)
   gitx ws path <名字>               打印绝对路径 (可 cd "$(gitx ws path x)")
@@ -82,10 +82,6 @@ def normalize(data: object) -> dict:
         if chosen not in spaces:
             chosen = next(iter(spaces), DEFAULT_SPACE)
         spaces.setdefault(DEFAULT_SPACE, {"root": _default_root(), "repos": {}})
-        # 配置项 workspace 是"默认工作区根目录"的镜像: 手改配置文件也能生效
-        configured = str(config.load().get("workspace") or "").strip()
-        if configured and chosen in spaces:
-            spaces[chosen]["root"] = os.path.abspath(os.path.expanduser(configured))
         return {"version": 2, "default": chosen, "spaces": spaces}
     repos = data.get("repos")
     old = {str(k): v for k, v in repos.items() if isinstance(v, dict)} if isinstance(repos, dict) else {}
@@ -107,11 +103,17 @@ def load_registry() -> dict:
 
 
 def save_registry(data: dict) -> None:
+    """写清单, 并把"默认工作区根目录"同步进配置项 workspace (两处永远一致)."""
+    normalized = normalize(data)
     path = registry_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(normalize(data), ensure_ascii=False, indent=2), "utf-8")
+    default_root = str(normalized["spaces"][normalized["default"]]["root"])
+    tmp.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), "utf-8")
     tmp.replace(path)
+    cfg = config.load()
+    if str(cfg.get("workspace") or "") != default_root:
+        config.save({**cfg, "workspace": default_root})
 
 
 def space_name(flag: str = "") -> str:
@@ -154,8 +156,6 @@ def set_root(path: str, name: str = "") -> None:
     data = load_registry()
     data["spaces"][chosen]["root"] = value
     save_registry(data)
-    if chosen == data["default"]:
-        config.save({**config.load(), "workspace": value})  # 同步到配置文件, 便于查看
     console.done(f"工作区 {chosen} 的根目录: {value}")
 
 
@@ -193,10 +193,47 @@ def use(name: str, dir_: str = "") -> None:
     data["default"] = name
     save_registry(data)
     info = spaces[name]
-    # 默认工作区的根目录同步进配置, `gitx config` 里能直接看到
-    if str(config.load().get("workspace") or "") != info["root"]:
-        config.save({**config.load(), "workspace": info["root"]})
     console.done(f"默认工作区: {name} ({info['root']}, {len(info['repos'])} 个仓库)")
+
+
+def move(dest: str, *, space: str = "") -> None:
+    """把某个工作区的整个目录搬到新位置 (仓库路径一起更新, 外置登记的目录不动)."""
+    chosen = space_name(space)
+    data = load_registry()
+    current = _ensure(data, chosen)
+    old_root = str(current["root"])
+    new_root = os.path.abspath(os.path.expanduser(dest))
+    if new_root == os.path.abspath(old_root):
+        console.info(f"工作区 {chosen} 已经在这里: {new_root}")
+        return
+    os.makedirs(new_root, exist_ok=True)
+    moved = skipped = 0
+    for key, item in current["repos"].items():
+        path = str(item.get("path") or "")
+        if not os.path.isdir(path):
+            skipped += 1
+            continue
+        try:
+            inside = os.path.commonpath([os.path.abspath(old_root), os.path.abspath(path)]) \
+                == os.path.abspath(old_root)
+        except ValueError:
+            inside = False
+        if not inside:  # 登记在别处的仓库: 保留原路径, 只改工作区根目录
+            skipped += 1
+            continue
+        target = os.path.join(new_root, os.path.relpath(path, old_root))
+        if os.path.exists(target):
+            console.warn(f"目标已存在, 跳过 {key}: {target}")
+            skipped += 1
+            continue
+        os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
+        shutil.move(path, target)
+        item["path"] = os.path.abspath(target)
+        moved += 1
+    current["root"] = new_root
+    save_registry(data)
+    console.done(f"工作区 {chosen} 已搬到 {new_root} (移动 {moved} 个仓库"
+                 + (f", 跳过 {skipped} 个)" if skipped else ")"))
 
 
 def list_spaces() -> None:
@@ -228,8 +265,6 @@ def drop_space(name: str, *, delete: bool = False, yes: bool = False) -> None:
     data["spaces"].pop(name, None)
     if data["default"] == name:
         data["default"] = next(iter(data["spaces"]))
-        fallback = data["spaces"][data["default"]]["root"]
-        config.save({**config.load(), "workspace": fallback})
     save_registry(data)
     console.done(f"已删除工作区 {name}" + (" (目录已删除)" if delete else " (目录保留)"))
     console.info(f"默认工作区: {data['default']}")
@@ -490,6 +525,30 @@ def find(keyword: str, *, space: str = "") -> None:
 
 # ---------------------------------------------------------------- 同步
 
+def _canonicalize_remote(item: dict) -> None:
+    """把"克隆时烧进 URL 的镜像前缀"还原成直连地址.
+
+    旧版本克隆会把 `https://v4.gh-proxy.org/https://github.com/...` 存成 origin:
+    之后 fetch / pull 永远打那个镜像 (换源、--no-proxy 都无效, 镜像缓存旧时看起来
+    "fetch 了却没有新提交")。改成直连后, 加速由每条 git 命令的 -c insteadOf 临时提供。
+    """
+    path = str(item.get("path") or "")
+    remote = config.default_remote()
+    # 用 config 读"存储的 URL": remote get-url 会套上 insteadOf, 看起来永远像加速地址
+    rc, url = gitcmd.capture(["git", "-C", path, "config", "--get", f"remote.{remote}.url"])
+    if rc != 0:
+        return
+    if not url.startswith(("http://", "https://")) or url.startswith("https://github.com/"):
+        return
+    parsed = github.owner_repo(url)
+    if not parsed:
+        return
+    direct = github.repo_clone_url(*parsed)
+    if direct != url:
+        subprocess.run(["git", "-C", path, "remote", "set-url", remote, direct],
+                       check=False, capture_output=True)
+
+
 def _fetch_or_pull(item: dict, prefix: str | None, *, pull: bool) -> tuple[str, str]:
     """返回 (状态, 说明); 不抛异常, 单个失败不影响其余."""
     path = str(item.get("path") or "")
@@ -497,6 +556,7 @@ def _fetch_or_pull(item: dict, prefix: str | None, *, pull: bool) -> tuple[str, 
         return "缺失", path
     if not gitcmd.remote_url(config.default_remote(), path):
         return "无远程", path
+    _canonicalize_remote(item)
     if not gitcmd.fetch_remote(path, prefix=prefix):
         return "失败", "fetch 失败 (可 --no-proxy 直连)"
     if not pull:
@@ -513,17 +573,19 @@ def _fetch_or_pull(item: dict, prefix: str | None, *, pull: bool) -> tuple[str, 
 
 def sync(names: list[str], *, pull: bool = True, all_: bool = False,
          proxy: str | None = None, no_proxy: bool = False, jobs: int = 1,
-         space: str = "") -> None:
+         space: str = "", fetch_only: bool = False) -> None:
+    """pull=True 时逐个 `git pull`; fetch_only=True 时只更新远端引用 (旧行为)."""
     picked = _select(names, all_=all_ or not names, space_name_=space)
     prefix = config.active_proxy(proxy, no_proxy)
-    console.step(f"{'同步' if pull else '更新'} {len(picked)} 个仓库"
+    do_pull = pull and not fetch_only
+    console.step(f"{'同步' if do_pull else '更新'} {len(picked)} 个仓库"
                  + (" [加速]" if prefix else ""))
     results: list[tuple[str, str, str]] = []
     if jobs > 1 and len(picked) > 1 and hasattr(os, "fork"):
-        results = _parallel(picked, prefix, pull, jobs)
+        results = _parallel(picked, prefix, do_pull, jobs)
     else:
         for key, item in picked:
-            results.append((key, *_fetch_or_pull(item, prefix, pull=pull)))
+            results.append((key, *_fetch_or_pull(item, prefix, pull=do_pull)))
     table = console.table("名称", "结果", "说明")
     bad = 0
     for key, state, detail in results:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 
-__version__ = "1.1.0-pre1"  # 与 pyproject.toml 的 version 必须一致 (发版流程第 1 步)
+__version__ = "1.1.0-pre2"  # 与 pyproject.toml 的 version 必须一致 (发版流程第 1 步)
 
 
 def main(argv: list[str] | None = None) -> None:

@@ -1,6 +1,6 @@
 ---
 name: gitx
-version: 1.1.0-pre1
+version: 1.1.0-pre2
 description: 给中国人用的 GitHub 加速与同步工具 —— 下载 / 同步 / 加速 / 分支 / 暂存 / 标签 / 提交 / 改动 / 发行版 / Actions / 账号 / 我的仓库，一条命令搞定
 author: FLT18355
 repository: https://github.com/FLT18355/gitx
@@ -85,11 +85,12 @@ gitx sync                            # 同步当前仓库
 | `gitx ws <仓库> <目录>` | 克隆到指定目录（已存在则视为父目录；本地/任意 git 地址也支持） |
 | `gitx ws add <目录>` | 登记已有本地克隆（从 origin 识别 owner/repo） |
 | `gitx ws` / `gitx ws list` | 总览：分支 / 改动 / 领先落后 / 最近提交 |
-| `gitx ws status` / `sync` / `fetch` | 逐个看改动 / fetch + 变基拉取（有改动只 fetch）/ 只 fetch |
+| `gitx ws status` / `sync` / `fetch` | 逐个看改动 / fetch + 变基拉取（有改动只 fetch）/ `fetch` 也是逐个 `git pull`（`--fetch-only` 只更新远端引用） |
 | `gitx ws each <命令...>` | 每个仓库都跑一遍同一条命令 |
 | `gitx ws path` / `cd <名字>` | 绝对路径 / 进入方法（`--shell` 输出 `cd`，可 `eval`） |
 | `gitx ws find` / `rm` / `prune` / `root` | 查找 / 移出清单（`--delete` 删目录）/ 清理失效项 / 当前工作区根目录 |
-| `gitx ws use <名字> [--root 目录]` | 切换默认工作区（不存在就新建），之后所有 `ws` 命令都作用在它上面 |
+| `gitx ws use <名字> [目录]` | 切换默认工作区（不存在就新建；根目录可放在任意位置） |
+| `gitx ws move <新目录>` | 把当前工作区整个搬走（仓库一起搬，清单路径同步更新） |
 | `gitx ws spaces` / `drop <名字>` | 列出所有工作区 / 删除工作区（`--delete` 连目录） |
 | `gitx ws -s <名字> ...` / `GITX_WS_SPACE` | 临时对另一个工作区操作 |
 
@@ -144,6 +145,15 @@ gitx sync                            # 同步当前仓库
 > 登录 / 退出 / 切换 / 刷新都由 `gh` 自己做交互（设备码 / 浏览器 / SSH 密钥），gitx 只透传输出；
 > 没登录时 `gitx auth` 给中文提示。`--hostname` 供 GitHub Enterprise 使用。
 
+### 🌐 GitHub API (直通 gh api)
+
+| 命令 | 说明 |
+|------|------|
+| `gitx api` | 直通 `gh api`；**不带参数 = `rate_limit`**，渲染成中文表格（资源 / 限额 / 已用 / 剩余 / 重置时间）；`--raw` 看 gh 原始 JSON |
+| `gitx api <端点> [gh api 参数...]` | 端点与 `--jq` / `-X` / `-f` / `-H` / `--paginate` 等全部原样转发；例：`gitx api user`、`gitx api repos/cli/cli -q .stargazers_count`、`gitx api graphql -f query='{viewer{login}}'` |
+
+> 鉴权用 `gh` 的登录态（`gitx auth login`）；写操作权限按 gh 当前授权范围生效。
+
 ### 🗂️ 我的仓库 (挑一个 → 编辑界面，交给 gh)
 
 | 命令 | 说明 |
@@ -161,6 +171,7 @@ gitx sync                            # 同步当前仓库
 | `gitx repos archive\|unarchive [owner/repo]` | 归档 / 取消归档 |
 | `gitx repos sync [owner/repo] [-s 源] [-b 分支] [--force]` | 与上游 / 源仓库对齐 |
 | `gitx repos star\|unstar [owner/repo]` | 收藏 / 取消收藏 |
+| `gitx repos starred [-n 10]` | **浏览收藏**：↑↓ 挑一个，光标越过已加载的最后一条时自动向 GitHub 取下一批 10 个；挑中后可克隆 / 登记到工作区 / 看概览 / 打开网页 / 取消收藏。`-o` 看别人公开收藏，`--sort created\|updated`，`--order asc\|desc`，`-l` 表格，`--all` 全部，`--json`，`--fresh` |
 | `gitx repos set-default [owner/repo]` | 设为当前目录的默认仓库 |
 | `gitx repos delete [owner/repo] [-y]` | 删除仓库（不可恢复，需要 delete_repo 权限） |
 

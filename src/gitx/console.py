@@ -149,9 +149,9 @@ def _assume_yes() -> bool:
 
     return bool(config.load().get("assume_yes"))
 
-def txt(value: Any) -> Text:
+def txt(value: Any, style: str = "") -> Text:
     """把任意值变成不做 markup 解析的 Text (表格 / 面板里放动态内容时用)."""
-    return Text(str(value))
+    return Text(str(value), style=style or None)
 
 
 def styled(markup: str) -> Text:
@@ -494,6 +494,19 @@ def text(message: str, *, default: str = "", instruction: str = "") -> str | Non
 
     return questionary.text(message, default=default, instruction=instruction or None,
                             style=questionary.Style(picker_style())).ask()
+
+
+@contextlib.contextmanager
+def working(description: str):
+    """单行滚动状态 (批量同步这类"每一步都很慢"的循环用).
+
+    非交互终端下静默, 因此重定向 / CI 日志里不会多出转义序列。
+    """
+    if not console.is_terminal:
+        yield lambda _message: None
+        return
+    with console.status(description, spinner="dots", spinner_style="step") as status:
+        yield status.update
 
 
 def progress() -> Progress:

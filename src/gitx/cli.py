@@ -58,6 +58,7 @@ _EPILOG = """[key]示例[/key]
   gitx ws cli/cli                                   克隆到工作区 ~/gitx-workspaces/cli
   gitx ws cli/cli ~/code/cli                        克隆到指定目录并登记
   gitx ws sync                                      工作区里的仓库逐个拉取 (有改动只 fetch)
+  gitx ws fetch -j 4                                并行同步并列出分支 / 拉取数量 / 失败原因
   gitx ws each git status -s                        每个仓库都跑一遍同一条命令
   gitx release cli/cli --list                       看最新发布的附件清单
   gitx release cli/cli --asset '*linux_amd64*'      只下匹配的附件

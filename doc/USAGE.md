@@ -36,7 +36,9 @@
 - `gitx ws owner/repo`：克隆到默认工作区并登记
 - `gitx ws add ~/code/已有克隆`：登记已有仓库
 - `gitx ws list`：查看所有登记的仓库状态（分支/改动/领先落后）
-- `gitx ws sync -j 4`：批量拉取所有仓库（并发 4）
+- `gitx ws sync -j 4`：批量拉取所有仓库（并发 4；工作区有改动 / 无上游的仓库只 fetch）
+- `gitx ws fetch`：逐个同步，表格里显示每个仓库的分支、结果与拉取的提交数
+- `gitx ws fetch --fetch-only -j 4`：只更新远端跟踪引用，不合并（适合先看落后多少）
 - `gitx ws each git status -s`：在每个仓库执行同一条命令
 - `gitx ws use <名字> [目录]`：切换或创建新的工作区
 

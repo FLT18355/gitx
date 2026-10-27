@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import os
 
+from rich.text import Text
+
 from . import cache, config, console, download, ghcli
 
 # gh repo list / view 的 JSON 字段: 够画表格, 也够渲染编辑界面的"当前设置"
@@ -95,10 +97,27 @@ def _recall(key: str, *, fresh: bool) -> object | None:
     return None if fresh else cache.get(key)
 
 
+def _validate_filters(*, source: bool = False, forks: bool = False,
+                      archived: bool = False, no_archived: bool = False) -> None:
+    """互斥的过滤项提前报错, 别等 gh 返回一句英文用法错误."""
+    if archived and no_archived:
+        console.error("--archived 与 --no-archived 只能选一个")
+    if source and forks:
+        console.error("--source 与 --fork 只能选一个")
+
+
+def _check_filter_dict(filters: dict) -> None:
+    _validate_filters(source=bool(filters.get("source")),
+                      forks=bool(filters.get("forks")),
+                      archived=bool(filters.get("archived")),
+                      no_archived=bool(filters.get("no_archived")))
+
+
 def _filters(visibility: str = "", *, source: bool = False, forks: bool = False,
              archived: bool = False, no_archived: bool = False, language: str = "",
              topic: str = "") -> list[str]:
     """gh repo list 的过滤参数."""
+    _validate_filters(source=source, forks=forks, archived=archived, no_archived=no_archived)
     args: list[str] = []
     if visibility:
         args += ["--visibility", visibility]
@@ -117,6 +136,27 @@ def _filters(visibility: str = "", *, source: bool = False, forks: bool = False,
     return args
 
 
+def _filter_summary(filters: dict) -> str:
+    """生效的过滤条件 -> 一句人话 (表格标题 / 提示用)."""
+    parts: list[str] = []
+    visibility = str(filters.get("visibility") or "")
+    if visibility:
+        parts.append(_VISIBILITY_ZH.get(visibility, visibility))
+    if filters.get("source"):
+        parts.append("非复刻")
+    if filters.get("forks"):
+        parts.append("仅复刻")
+    if filters.get("archived"):
+        parts.append("仅已归档")
+    if filters.get("no_archived"):
+        parts.append("排除已归档")
+    if filters.get("language"):
+        parts.append(f"语言 {filters['language']}")
+    if filters.get("topic"):
+        parts.append(f"话题 {filters['topic']}")
+    return " · ".join(parts)
+
+
 def _filter_key(filters: dict) -> str:
     """过滤项 -> 稳定的缓存键片段 (只保留真正生效的项, 顺序固定)."""
     active = sorted((name, value) for name, value in filters.items()
@@ -125,8 +165,9 @@ def _filter_key(filters: dict) -> str:
 
 
 def fetch_repos(owner: str = "", *, limit: int = DEFAULT_LIMIT, fresh: bool = False,
-                **filters: object) -> list[dict]:
+                quiet: bool = False, **filters: object) -> list[dict]:
     """我的 (或某个 owner 的) 仓库列表, 按最近推送从新到旧; limit 决定只取前几个."""
+    _check_filter_dict(filters)
     count = max(1, int(limit))
     key = f"{_PREFIX}list:{owner or '@me'}:{count}:{_filter_key(filters)}"
     hit = _recall(key, fresh=fresh)
@@ -135,7 +176,8 @@ def fetch_repos(owner: str = "", *, limit: int = DEFAULT_LIMIT, fresh: bool = Fa
     gh = _gh()
     args = ["repo", "list", *([owner] if owner else []), "-L", str(count),
             "--json", LIST_FIELDS, *_filters(**filters)]  # type: ignore[arg-type]
-    console.step(f"正在取{owner or '我的'}仓库 (前 {count} 个) ...")
+    if not quiet:
+        console.step(f"正在取{owner or '我的'}仓库 (前 {count} 个) ...")
     data = ghcli.json_out(gh, args, "列出仓库")
     if not isinstance(data, list):
         console.error("仓库数据异常, 请稍后重试")
@@ -185,6 +227,7 @@ def _search_args(keyword: str, owner: str, limit: int, *, visibility: str = "",
     """
     args = ["search", "repos", keyword, "--owner", owner or "@me",
             "-L", str(max(1, int(limit))), "--json", SEARCH_FIELDS]
+    _validate_filters(source=source, forks=forks, archived=archived, no_archived=no_archived)
     if visibility:
         args += ["--visibility", visibility]
     if language:
@@ -203,8 +246,9 @@ def _search_args(keyword: str, owner: str, limit: int, *, visibility: str = "",
 
 
 def search_repos(keyword: str, owner: str = "", *, limit: int = DEFAULT_LIMIT,
-                 fresh: bool = False, **filters: object) -> list[dict]:
+                 fresh: bool = False, quiet: bool = False, **filters: object) -> list[dict]:
     """按关键词搜仓库 (仓库名 / 描述命中), 不受"只取前 -n 个"的限制."""
+    _check_filter_dict(filters)
     text = keyword.strip()
     if not text:
         console.error("请给搜索词: gitx repos -q <关键词>")
@@ -214,7 +258,8 @@ def search_repos(keyword: str, owner: str = "", *, limit: int = DEFAULT_LIMIT,
     if isinstance(hit, list):
         return hit
     gh = _gh()
-    console.step(f"搜索{owner or '我的'}仓库: {text}")
+    if not quiet:
+        console.step(f"搜索{owner or '我的'}仓库: {text}")
     args = _search_args(text, owner, count, **filters)  # type: ignore[arg-type]
     data = ghcli.json_out(gh, args, "搜索仓库")
     if not isinstance(data, list):
@@ -225,11 +270,11 @@ def search_repos(keyword: str, owner: str = "", *, limit: int = DEFAULT_LIMIT,
 
 
 def fetch(keyword: str = "", owner: str = "", *, limit: int = DEFAULT_LIMIT,
-          fresh: bool = False, **filters: object) -> list[dict]:
+          fresh: bool = False, quiet: bool = False, **filters: object) -> list[dict]:
     """有搜索词就搜 (搜得到全部), 没有就按最近推送列前 limit 个; 两者字段已统一."""
     if keyword.strip():
-        return search_repos(keyword, owner, limit=limit, fresh=fresh, **filters)
-    return fetch_repos(owner, limit=limit, fresh=fresh, **filters)
+        return search_repos(keyword, owner, limit=limit, fresh=fresh, quiet=quiet, **filters)
+    return fetch_repos(owner, limit=limit, fresh=fresh, quiet=quiet, **filters)
 
 
 def fetch_repo(target: str, *, fresh: bool = False) -> dict:
@@ -555,6 +600,13 @@ def resolve(target: str = "", *, owner: str = "", limit: int = DEFAULT_LIMIT, wh
     return str(picked.get("nameWithOwner") or "")
 
 
+def _print_json(value: object) -> None:
+    import json
+
+    console.print(json.dumps(value, ensure_ascii=False, indent=2),
+                  soft_wrap=True, markup=False, highlight=False)
+
+
 def _repo_table(repos: list[dict], title: str) -> None:
     table = console.table("仓库", "描述", "可见性", "★", "语言", "更新", "标记", title=title)
     for repo in repos:
@@ -563,8 +615,11 @@ def _repo_table(repos: list[dict], title: str) -> None:
                              "复刻" if repo.get("isFork") else "",
                              "模板" if repo.get("isTemplate") else "",
                              "已收藏" if repo.get("viewerHasStarred") else "") if m]
+        nwo = str(repo.get("nameWithOwner") or "")
+        url = str(repo.get("url") or "")
+        name = console.link(nwo, url) if url else console.txt(nwo)
         table.add_row(
-            console.txt(repo.get("nameWithOwner") or ""),
+            name,
             console.txt(str(repo.get("description") or "")[:48]),
             console.txt(_VISIBILITY_ZH.get(str(repo.get("visibility") or "").lower(),
                                            str(repo.get("visibility") or "").lower() or "-")),
@@ -577,9 +632,12 @@ def _repo_table(repos: list[dict], title: str) -> None:
 
 
 def list_repos(owner: str = "", *, limit: int = DEFAULT_LIMIT, keyword: str = "",
-               fresh: bool = False, **filters: object) -> None:
+               fresh: bool = False, json_out: bool = False, **filters: object) -> None:
     """列出仓库: 仓库 / 描述 / 可见性 / star / 语言 / 更新 / 标记 (给关键词 = 搜索结果)."""
-    repos = fetch(keyword, owner, limit=limit, fresh=fresh, **filters)
+    repos = fetch(keyword, owner, limit=limit, fresh=fresh, quiet=json_out, **filters)
+    if json_out:
+        _print_json(repos)
+        return
     where = f"{owner} 的" if owner else "我的"
     if not repos:
         if keyword:
@@ -589,12 +647,21 @@ def list_repos(owner: str = "", *, limit: int = DEFAULT_LIMIT, keyword: str = ""
         console.info(f"{where}仓库 0 个 (换个过滤条件看看)\n"
                      "提示: gitx repos list --no-archived --source 只看未归档的非复刻仓库")
         return
+    tags = _filter_summary(filters)
     title = f"搜索 {keyword!r}: {len(repos)} 个" if keyword else f"{where}仓库 {len(repos)} 个"
+    if tags:
+        title += f" ({tags})"
     _repo_table(repos, title)
-    console.info("进编辑界面改设置: gitx repos   |   看某一个: gitx repos view <owner/repo>")
+    if keyword:
+        console.info("进编辑界面改设置: gitx repos   |   看某一个: gitx repos view <owner/repo>")
+    else:
+        more = (f" (只取了前 {limit} 个, 可能还有更多: 加大 -n 或 -q 关键词搜索)"
+                if len(repos) >= limit else "")
+        console.info(f"进编辑界面改设置: gitx repos   |   看某一个: gitx repos view <owner/repo>{more}")
 
 
-def view(target: str = "", *, web: bool = False, fresh: bool = False) -> None:
+def view(target: str = "", *, web: bool = False, fresh: bool = False,
+         json_out: bool = False) -> None:
     """查看单个仓库的设置 (--web 交给 gh 打开网页)."""
     gh = _gh()
     nwo = _nwo(target)
@@ -606,6 +673,9 @@ def view(target: str = "", *, web: bool = False, fresh: bool = False) -> None:
         gh, [*args, "--json", VIEW_FIELDS], "查看仓库")
     if not isinstance(repo, dict):
         console.error("仓库数据异常, 请稍后重试")
+    if json_out:
+        _print_json(repo)
+        return
     _show_settings(repo)
     console.info(f"改设置: gitx repos edit {repo.get('nameWithOwner')}"
                  "   |   进交互式编辑界面: gitx repos")
@@ -614,12 +684,18 @@ def view(target: str = "", *, web: bool = False, fresh: bool = False) -> None:
 def _show_settings(repo: dict) -> None:
     """把仓库当前设置摊成一张表 (编辑界面每轮都重画一次)."""
     nwo = str(repo.get("nameWithOwner") or "")
-    head = f"[key]{nwo}[/key]"
+    head = Text(nwo, style="key")
     if repo.get("isArchived"):
-        head += "  [warn]已归档[/warn]"
-    if repo.get("url"):
-        head += f"  [dim]{repo['url']}[/dim]"
+        head.append("  已归档", style="warn")
+    url = str(repo.get("url") or "")
+    if url:
+        head.append(f"  {url}", style="dim")
     console.print(head)
+    lang = (repo.get("primaryLanguage") or {}).get("name") or "-"
+    marks = [m for m in ("已归档" if repo.get("isArchived") else "",
+                         "复刻" if repo.get("isFork") else "",
+                         "模板" if repo.get("isTemplate") else "",
+                         "已收藏" if repo.get("viewerHasStarred") else "") if m]
     table = console.table("项", "当前值", title="仓库设置")
     table.add_row(console.txt("描述"), console.txt(repo.get("description") or "(空)"))
     table.add_row(console.txt("主页"), console.txt(repo.get("homepageUrl") or "(空)"))
@@ -631,7 +707,12 @@ def _show_settings(repo: dict) -> None:
     table.add_row(console.txt("功能"), console.txt(" / ".join(
         f"{zh}{'开' if repo.get(field) else '关'}" for field, _, zh in _FEATURES)))
     table.add_row(console.txt("模板仓库"), console.txt("是" if repo.get("isTemplate") else "否"))
-    table.add_row(console.txt("其它"), console.txt(_state(repo)))
+    table.add_row(console.txt("统计"), console.txt(
+        f"★ {int(repo.get('stargazerCount') or 0)} | fork {int(repo.get('forkCount') or 0)}"
+        f" | 语言 {lang}"))
+    updated = str(repo.get("updatedAt") or "")[:10]
+    table.add_row(console.txt("更新"), console.txt(updated or "-"))
+    table.add_row(console.txt("标记"), console.txt(" / ".join(marks) or "无"))
     if not repo.get("viewerCanAdminister"):
         table.add_row(console.txt("权限"), console.txt("没有管理权限 (写操作会被 GitHub 拒绝)"))
     console.print(table)
@@ -821,8 +902,11 @@ def fork(target: str, *, clone_: bool = False, remote: bool = False, org: str = 
     console.done(f"{nwo} 已复刻")
 
 
-def clone(target: str, dest: str = "", *, depth: int = 1) -> None:
-    """克隆到本地: 公开仓库[info]和 gitx download 一样走加速[/info], 私有仓库交给 gh (它自带凭据, 加速镜像拉私有仓库会失败)."""
+def clone(target: str, dest: str = "", *, depth: int = 1, repo: dict | None = None) -> None:
+    """克隆到本地: 公开仓库[info]和 gitx download 一样走加速[/info], 私有仓库交给 gh (它自带凭据, 加速镜像拉私有仓库会失败).
+
+    repo 已知 (挑选器 / 收藏浏览) 时直接看它的 visibility, 少跑一次 `gh repo view`。
+    """
     gh = _gh()
     nwo = _need(target, "clone")
     name = nwo.split("/")[-1]
@@ -830,7 +914,9 @@ def clone(target: str, dest: str = "", *, depth: int = 1) -> None:
     path = os.path.join(base, name)
     if os.path.exists(path):
         console.error(f"目标已存在: {path}\n提示: 换个目录 (--dir) 或先删掉它")
-    if _private(nwo):
+    private = (str(repo.get("visibility") or "").lower() != "public"
+               if repo is not None else _private(nwo))
+    if private:
         console.step(f"私有仓库 {nwo}: 交给 gh 克隆 (自带登录凭据, 不走加速镜像) ...")
         ghcli.run(gh, ["repo", "clone", nwo, path], "克隆仓库")
         console.done(f"完成! 已保存到: {os.path.abspath(path)}")
@@ -1033,12 +1119,14 @@ def _act(action: str, repo: dict) -> dict | None:
         else:
             console.warn("没有改动")
     elif action == "clone":
-        clone(nwo)
+        clone(nwo, repo=repo)
+        return repo
     elif action == "web":
         view(nwo, web=True)
         return repo
     elif action == "default":
         set_default(nwo)
+        return repo
     elif action == "delete":
         _act_delete(nwo)
         return None if not _exists(nwo) else repo

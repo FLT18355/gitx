@@ -162,8 +162,8 @@ gitx sync                            # 同步当前仓库
 | `gitx repos -q dotfile` | 按关键词**搜**仓库（`gh search repos`，搜得到全部，不受 `-n` 限制；挑选器底部也有一条「用关键词搜全部仓库」） |
 | `gitx repos -n 5` | 只取最近 5 个仓库来挑（`-o` 看别人的仓库；`--visibility` / `-l` / `-t` / `--source` / `--fork` / `--no-archived` 过滤；`--fresh` 不吃缓存） |
 | `gitx repos edit [owner/repo]` | 跳过挑选直接进编辑界面；非交互则给选项：`-d` 描述 / `-H` 主页 / `-t`·`--remove-topic` 话题 / `--visibility` / `-b` 默认分支 / `--template`+`--no-template` / `--issues`·`--wiki`·`--projects`·`--discussions` |
-| `gitx repos list [-n 30]` | 表格列出仓库：仓库 / 描述 / 可见性 / ★ / 语言 / 更新 / 标记 |
-| `gitx repos view [owner/repo] [--web]` | 看当前设置（描述 / 主页 / 话题 / 可见性 / 默认分支 / 功能 / 模板 / star） |
+| `gitx repos list [-n 30] [--json]` | 表格列出仓库：仓库（可点击）/ 描述 / 可见性 / ★ / 语言 / 更新 / 标记；标题显示生效的过滤条件，条数打满 `-n` 时提示可能还有更多 |
+| `gitx repos view [owner/repo] [--web] [--json]` | 看当前设置（描述 / 主页 / 话题 / 可见性 / 默认分支 / 功能 / 模板 / ★ / fork / 语言 / 标记） |
 | `gitx repos clone [owner/repo] [-D 目录] [-d 深度]` | 克隆到本地（公开走加速，私有仓库交给 gh 克隆——加速镜像拉私有仓库会失败，推送仍直连） |
 | `gitx repos create <名字> [--source . --push]` | 新建仓库（`-d` / `-H` / `--visibility` / `--readme` / `-g` / `--license` / `-p` 模板 / `--no-issues` / `--no-wiki` / `--team`） |
 | `gitx repos fork [owner/repo] [-c]` | 复刻到自己的账号（`--org` / `--fork-name` / `--default-branch-only` / `--remote`） |

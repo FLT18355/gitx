@@ -73,7 +73,9 @@
 管理你的 GitHub 仓库。
 
 - `gitx repos`：交互式挑选仓库并进入编辑界面
+- `gitx repos list --json`：表格或 JSON 列出仓库（标题显示生效的过滤条件）
 - `gitx repos -q dotfile`：搜索你的仓库
+- `gitx repos view owner/repo --json`：查看仓库设置与统计（★ / fork / 语言 / 标记）
 - `gitx repos starred`：浏览你收藏的仓库，支持交互式挑选或自动翻页
 - `gitx repos create my-tool --public --push`：新建仓库
 - `gitx repos delete owner/repo -y`：删除仓库（危险操作）

@@ -58,6 +58,7 @@ _EPILOG = """[key]示例[/key]
   gitx ws cli/cli                                   克隆到工作区 ~/gitx-workspaces/cli
   gitx ws cli/cli ~/code/cli                        克隆到指定目录并登记
   gitx ws sync                                      工作区里的仓库逐个拉取 (有改动只 fetch)
+  gitx ws fetch -j 4                                并行同步并列出分支 / 拉取数量 / 失败原因
   gitx ws each git status -s                        每个仓库都跑一遍同一条命令
   gitx release cli/cli --list                       看最新发布的附件清单
   gitx release cli/cli --asset '*linux_amd64*'      只下匹配的附件
@@ -1266,9 +1267,10 @@ def publish_view(
     tag: Annotated[str, typer.Argument(metavar="标签", help="发行版标签; 留空 = 最新")] = "",
     repo: Annotated[str, typer.Option("--repo", "-R", help=_REPO_HELP)] = "",
     web: Annotated[bool, typer.Option("--web", "-w", help="在浏览器中打开发行版页面")] = False,
+    notes: Annotated[bool, typer.Option("--notes", "-n", help="显示完整说明 (默认只显示首行)")] = False,
 ) -> None:
-    """查看发行版: 状态 / 时间 / 说明首行 / 附件清单."""
-    publish.view(tag, repo, browse=web)
+    """查看发行版: 状态 / 时间 / 说明 / 附件清单 (附件含下载数)."""
+    publish.view(tag, repo, browse=web, notes=notes)
 
 
 @publish_app.command("create")
@@ -1428,8 +1430,9 @@ def repos_list(
     archived: Annotated[bool, typer.Option("--archived", help="只看已归档仓库")] = False,
     no_archived: Annotated[bool, typer.Option("--no-archived", help="排除已归档仓库")] = False,
     search: Annotated[str, typer.Option(
-        "--search", "-q", help="按关键词搜 (搜得到全部仓库, 不受 -n 限制)")] = "",
+        "--search", "-q", help="按关键词搜 (搜得到全部, 不受 -n 限制)")] = "",
     fresh: Annotated[bool, typer.Option("--fresh", help="不吃本地缓存, 重新向 GitHub 取一次")] = False,
+    json_out: Annotated[bool, typer.Option("--json", help="输出 JSON (脚本友好)")] = False,
 ) -> None:
     """列出仓库: 仓库 / 描述 / 可见性 / star / 语言 / 更新 / 标记.
 
@@ -1439,7 +1442,7 @@ def repos_list(
                      source=source, forks=forks, archived=archived,
                      no_archived=no_archived, keyword=search, fresh=fresh)
     ghrepo.list_repos(limit=int(limit or _PICK.get("limit") or config.default_limit("repos_limit", 30)),
-                      **picked)  # type: ignore[arg-type]
+                      json_out=json_out, **picked)  # type: ignore[arg-type]
 
 
 @repos_app.command("edit")
@@ -1501,9 +1504,10 @@ def repos_edit(
 def repos_view(
     target: Annotated[str, typer.Argument(metavar="[仓库]", help=_REPO_ARG)] = "",
     web: Annotated[bool, typer.Option("--web", "-w", help="在浏览器打开仓库页面")] = False,
+    json_out: Annotated[bool, typer.Option("--json", help="输出 JSON (脚本友好)")] = False,
 ) -> None:
-    """看仓库的当前设置: 描述 / 主页 / 话题 / 可见性 / 默认分支 / 功能."""
-    ghrepo.view(_pick_target(target, "view"), web=web, fresh=_fresh())
+    """看仓库的当前设置: 描述 / 主页 / 话题 / 可见性 / 默认分支 / 功能 / 统计."""
+    ghrepo.view(_pick_target(target, "view"), web=web, fresh=_fresh(), json_out=json_out)
 
 
 @repos_app.command("clone")

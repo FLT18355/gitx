@@ -549,26 +549,96 @@ def _canonicalize_remote(item: dict) -> None:
                        check=False, capture_output=True)
 
 
-def _fetch_or_pull(item: dict, prefix: str | None, *, pull: bool) -> tuple[str, str]:
-    """返回 (状态, 说明); 不抛异常, 单个失败不影响其余."""
+_STATE_STYLE = {
+    "已同步": "ok",
+    "已更新": "ok",
+    "仅 fetch": "warn",
+    "无远程": "warn",
+    "缺失": "err",
+    "失败": "err",
+}
+_STATE_ORDER = ("已同步", "已更新", "仅 fetch", "无远程", "缺失", "失败")
+_OK_STATES = ("已同步", "已更新", "仅 fetch")
+
+
+def _error_line(output: str) -> str:
+    """从 git 输出里挑一条能看的错误 (优先 fatal / 错误行, 而不是后面的提示行)."""
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    if not lines:
+        return ""
+    line = next((item for item in lines
+                 if "fatal" in item.lower() or "error" in item.lower()
+                 or "致命" in item or "错误" in item), lines[0])
+    for prefix in ("fatal: ", "error: ", "致命错误：", "致命错误: ", "错误：", "错误: "):
+        line = line.removeprefix(prefix)
+    return line[:120]
+
+
+def _changes_text(path: str) -> str:
+    staged, modified, untracked, conflicts = gitcmd.status_counts(path)
+    bits = []
+    if staged:
+        bits.append(f"暂存 {staged}")
+    if modified:
+        bits.append(f"修改 {modified}")
+    if untracked:
+        bits.append(f"未跟踪 {untracked}")
+    if conflicts:
+        bits.append(f"冲突 {conflicts}")
+    return " / ".join(bits) if bits else "工作区干净"
+
+
+def _track_detail(path: str) -> str:
+    """fetch 之后的领先 / 落后说明 (无上游时只说明引用已更新)."""
+    behind, ahead = gitcmd.behind_ahead(path)
+    if behind < 0:
+        return "无上游, 仅更新远端引用"
+    bits = []
+    if behind:
+        bits.append(f"落后 {behind} 个提交")
+    if ahead:
+        bits.append(f"领先 {ahead} 个提交")
+    return ", ".join(bits) or "已是最新"
+
+
+def _fetch_or_pull(item: dict, prefix: str | None, *, pull: bool) -> tuple[str, str, str]:
+    """返回 (分支, 状态, 说明); 不抛异常, 单个失败不影响其余."""
     path = str(item.get("path") or "")
-    if not os.path.isdir(path) or not gitcmd.is_repo(path):
-        return "缺失", path
-    if not gitcmd.remote_url(config.default_remote(), path):
-        return "无远程", path
+    if not os.path.isdir(path):
+        return "-", "缺失", f"目录不存在: {path} (可 gitx ws prune)"
+    if not gitcmd.is_repo(path):
+        return "-", "缺失", f"不是 git 仓库: {path}"
+    remote = config.default_remote()
+    if not gitcmd.remote_url(remote, path):
+        return "-", "无远程", f"没有 {remote} 远程 (gitx push to <仓库地址>)"
     _canonicalize_remote(item)
-    if not gitcmd.fetch_remote(path, prefix=prefix):
-        return "失败", "fetch 失败 (可 --no-proxy 直连)"
+    branch = gitcmd.current_branch(path) or "-"
+    ok, output = gitcmd.fetch_remote_detail(path, remote, prefix=prefix)
+    if not ok:
+        reason = _error_line(output) or "未知错误"
+        hint = " (可 --no-proxy 直连)" if prefix else ""
+        return branch, "失败", f"fetch 失败: {reason}{hint}"
     if not pull:
-        return "已更新", path
+        return branch, "已更新", _track_detail(path)
     if not gitcmd.has_upstream(path):
-        return "仅 fetch", "分支没有上游, 跳过合并"
+        return branch, "仅 fetch", "分支没有上游, 跳过合并"
     staged, modified, untracked, _ = gitcmd.status_counts(path)
     if staged or modified or untracked:
-        return "仅 fetch", "工作区有改动, 跳过合并 (先提交 / 暂存)"
-    if not gitcmd.pull(path, rebase=bool(config.load().get("sync_rebase", True)), prefix=prefix):
-        return "失败", "拉取失败 (可能有冲突, 用 gitx status 查看)"
-    return "已同步", path
+        return branch, "仅 fetch", f"工作区有改动 ({_changes_text(path)}), 跳过合并"
+    behind, ahead = gitcmd.behind_ahead(path)
+    rebase = bool(config.load().get("sync_rebase", True))
+    ok, output = gitcmd.pull_capture(path, rebase=rebase, prefix=prefix)
+    if not ok:
+        if gitcmd.status_counts(path)[3]:
+            detail = "变基停在冲突, 解决后 git rebase --continue (或 gitx rebase --abort)"
+        else:
+            detail = _error_line(output) or "详见上方 git 输出"
+        return branch, "失败", f"拉取失败: {detail}"
+    if behind > 0:
+        return branch, "已同步", f"拉取 {behind} 个提交" + (" (变基)" if rebase else "")
+    if ahead > 0:
+        return branch, "已同步", f"已是最新 (本地领先 {ahead} 个提交)"
+    return branch, "已同步", "已是最新"
 
 
 def sync(names: list[str], *, pull: bool = True, all_: bool = False,
@@ -578,65 +648,82 @@ def sync(names: list[str], *, pull: bool = True, all_: bool = False,
     picked = _select(names, all_=all_ or not names, space_name_=space)
     prefix = config.active_proxy(proxy, no_proxy)
     do_pull = pull and not fetch_only
-    console.step(f"{'同步' if do_pull else '更新'} {len(picked)} 个仓库"
-                 + (" [加速]" if prefix else ""))
-    results: list[tuple[str, str, str]] = []
-    if jobs > 1 and len(picked) > 1 and hasattr(os, "fork"):
+    total = len(picked)
+    verb = "同步" if do_pull else "更新"
+    console.step(f"{verb} {total} 个仓库" + (" [加速]" if prefix else ""))
+    started = time.monotonic()
+    results: list[tuple[str, str, str, str]] = []
+    if jobs > 1 and total > 1 and hasattr(os, "fork"):
         results = _parallel(picked, prefix, do_pull, jobs)
     else:
-        for key, item in picked:
-            results.append((key, *_fetch_or_pull(item, prefix, pull=do_pull)))
-    table = console.table("名称", "结果", "说明")
+        with console.working(f"{verb}中...") as update:
+            for index, (key, item) in enumerate(picked, start=1):
+                update(f"{verb} {key} ({index}/{total})")
+                results.append((key, *_fetch_or_pull(item, prefix, pull=do_pull)))
+    table = console.table("名称", "分支", "结果", "说明")
+    counts: dict[str, int] = {}
     bad = 0
-    for key, state, detail in results:
-        if state not in ("已同步", "已更新", "仅 fetch"):
+    for key, branch, state, detail in results:
+        counts[state] = counts.get(state, 0) + 1
+        if state not in _OK_STATES:
             bad += 1
-        table.add_row(console.txt(key), console.txt(state), console.txt(detail))
+        table.add_row(console.txt(key), console.txt(branch),
+                      console.txt(state, _STATE_STYLE.get(state, "")), console.txt(detail))
     console.print(table)
+    tally = " · ".join(f"{state} {counts[state]}"
+                       for state in _STATE_ORDER if counts.get(state))
+    console.info(f"{total} 个仓库: {tally}  |  用时 {time.monotonic() - started:.1f}s")
     if bad:
-        console.warn(f"{bad} 个仓库未能同步, 见上表")
+        console.warn(f"{bad} 个仓库未能{verb}, 见上表")
     else:
-        console.done("全部完成")
+        skipped = counts.get("仅 fetch", 0)
+        console.done("全部完成" + (f" ({skipped} 个仅 fetch, 未合并)" if skipped else ""))
 
 
 def _parallel(picked: list[tuple[str, dict]], prefix: str | None, pull: bool,
-              jobs: int) -> list[tuple[str, str, str]]:
-    """fork 并行同步 (每个子进程只写自己的结果文件, 父进程汇总)."""
+              jobs: int) -> list[tuple[str, str, str, str]]:
+    """fork 并行同步 (每个子进程只写自己的结果文件, 父进程汇总并按清单顺序输出)."""
     import tempfile
 
-    results: list[tuple[str, str, str]] = []
-    pending = list(picked)
-    running: list[tuple[int, int, str, str]] = []
+    results: list[tuple[int, str, str, str, str]] = []
+    pending = list(enumerate(picked))
+    running: dict[int, tuple[int, str, str]] = {}
+    total = len(picked)
+    verb = "同步" if pull else "更新"
     tmpdir = tempfile.mkdtemp(prefix="gitx-ws-")
-    index = 0
     try:
-        while pending or running:
-            while pending and len(running) < max(1, jobs):
-                key, item = pending.pop(0)
-                out = os.path.join(tmpdir, str(index))
-                pid = os.fork()
-                if pid == 0:  # 子进程
-                    try:
-                        state, detail = _fetch_or_pull(item, prefix, pull=pull)
-                    except BaseException as exc:  # noqa: BLE001
-                        state, detail = "失败", str(exc)
-                    try:
-                        with open(out, "w", encoding="utf-8") as handle:
-                            handle.write(f"{state}\t{detail}")
-                    finally:
-                        os._exit(0)
-                running.append((pid, index, key, out))
-                index += 1
-            pid, _, key, out = running.pop(0)
-            os.waitpid(pid, 0)
-            try:
-                state, detail = Path(out).read_text("utf-8").split("\t", 1)
-            except (OSError, ValueError):
-                state, detail = "失败", "子进程没有返回结果"
-            results.append((key, state, detail))
+        with console.working(f"{verb}中...") as update:
+            while pending or running:
+                while pending and len(running) < max(1, jobs):
+                    index, (key, item) = pending.pop(0)
+                    out = os.path.join(tmpdir, str(index))
+                    pid = os.fork()
+                    if pid == 0:  # 子进程
+                        try:
+                            branch, state, detail = _fetch_or_pull(item, prefix, pull=pull)
+                        except BaseException as exc:  # noqa: BLE001
+                            branch, state, detail = "-", "失败", str(exc)
+                        try:
+                            with open(out, "w", encoding="utf-8") as handle:
+                                json.dump([branch, state, detail], handle, ensure_ascii=False)
+                        finally:
+                            os._exit(0)
+                    running[pid] = (index, key, out)
+                pid, _ = os.waitpid(-1, 0)
+                meta = running.pop(pid, None)
+                if meta is None:  # 不是本函数 fork 的子进程, 别吞掉它的退出码
+                    continue
+                index, key, out = meta
+                try:
+                    branch, state, detail = json.loads(Path(out).read_text("utf-8"))
+                except (OSError, ValueError):
+                    branch, state, detail = "-", "失败", "子进程没有返回结果"
+                results.append((index, key, branch, state, detail))
+                update(f"{verb}中... ({len(results)}/{total} 完成)")
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
-    return results
+    results.sort(key=lambda row: row[0])
+    return [(key, branch, state, detail) for _, key, branch, state, detail in results]
 
 
 # ---------------------------------------------------------------- 每个仓库执行

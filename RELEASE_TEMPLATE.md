@@ -1,65 +1,55 @@
-# gitx v1.0.8 发布说明
+# gitx v1.1.0-pre2 发布说明
 
-热修: v1.0.7 的 wheel 在 `publish create` / `publish edit` 之后会因 `NameError: cache` 崩 (源码导入漏了一行, 只在预热好的守护进程里才暴露), 这一版只补它 —— 没有别的改动。 没升到 v1.0.7 的直接升 v1.0.8 即可。
+v1.1.0 的第二个预览版，重点改进工作区批量同步、`gitx repos` 仓库管理、本地仓库概览与发行版查看。
 
-## 🐛 修复
+## 🚀 工作区
 
-- **开了守护进程后有些地方掉色 / 表格按 80 列折行** —— rich 在 `Console` 构造时就把
-  "是不是终端 / 多少列 / 支持几种颜色"定死了; 守护进程自己的 stdout/stderr 指向日志文件,
-  于是它建出来的控制台记住的是"没有终端 + 80 列 + 不带颜色", fork 出的子进程**哪怕换成你的
-  终端**也仍按这个旧结论渲染。现在子进程执行前会按当前 fd **重建控制台**, 颜色与终端宽度都正常;
-  配色仍按 `palette` 走 (`auto` = 开了守护进程就用终端自己的 16 色)。
+- `gitx ws fetch` / `gitx ws sync` 输出改为「名称 / 分支 / 结果 / 说明」，说明列直接给出
+  `拉取 2 个提交 (变基)`、`落后 1 个提交`、`仅 fetch（工作区有改动）` 等信息。
+- 汇总行显示各状态数量与耗时；失败时直接显示 git 的 fatal 行，变基冲突提示继续 / 放弃命令。
+- 并行同步改为先完成先回收，不再按 fork 顺序阻塞等待；最终结果仍按清单顺序输出。
+- 批量拉取静默捕获 git 输出，避免多个仓库的进度与报错互相穿插。
 
-- **`gitx daemon stop` 要等三分钟** —— `stop` / `restart` 自己也被路由进了守护进程, 而它单线程
-  收请求: 它正等着这个子进程结束, 子进程却在等它回 stop 的应答, 于是互相等成死锁。现在
-  **"管守护进程自己"的命令一律本地执行**, 并且改成**不导入 typer / rich 的快速通道** ——
-  `gitx daemon status` / `stop` 从约 2.3 秒降到 1 秒以内 (只剩 Python 启动);
-  socket 也加了 30 秒兜底超时, 任何情况下都不会再"卡住不退"。
+## 🗂️ 仓库管理 (`gitx repos`)
 
-- **开了守护进程感觉没什么效果** —— 三处一起补:
-  1. 第一条命令在召唤成功后**也走守护进程** (之前是"这条本地跑, 下条才快");
-  2. 预热清单连带 `prompt_toolkit` / `questionary` / `rich.progress`, 所以**选择器与进度条**
-     也不再重付导入 (交互命令原本要重付约 2 秒);
-  3. 新增 **`gitx daemon bench`**, 直接在你机器上量"有/没有守护进程"的差距 (各跑几轮取中位数)。
+- 交互界面新增「分支管理」：列出远端分支（提交短哈希 / 默认 / 受保护），可设默认分支、
+  从任一现有分支新建、删除非默认且非受保护的分支。
+- `repos list` 仓库名可点击；标题显示生效的过滤条件；条数打满 `-n` 时提示可能还有更多。
+- `repos list` / `repos view` 新增 `--json`，JSON 模式不混入进度提示，方便脚本解析。
+- `--archived` 与 `--no-archived`、`--source` 与 `--fork` 互斥，提前给出中文错误。
+- 交互界面克隆时复用已知可见性，少跑一次 `gh repo view`；克隆 / 打开网页 / 设默认后不再多余刷新。
+- `repos view` 增加 ★ / fork / 语言 / 标记统计。
 
-## 🔧 新增
+## 📊 仓库概览与发行版
 
-```bash
-gitx daemon bench            # 实测这台机器的差距 (本机示例: 本地 1.9s -> 经守护进程 1.4s)
-gitx daemon bench -n 5       # 各跑 5 轮
-gitx daemon bench --cmd "repos list"   # 换成你要量的命令
-gitx daemon status           # 快速通道: 配置 / 进程 / 空闲退出 / 实际配色
-gitx daemon stop             # 立刻退出 (毫秒级)
-```
+- `gitx info` 修复 jj / 分离 HEAD 下误报「尚无提交」；新增上游、提交 / 分支 / 标签数，
+  并按落后、领先、冲突、无上游给出对应的下一步命令。
+- `gitx publish view` 附件表新增下载数；`--notes` 查看完整发行说明；草稿 / 预发布 / 最新状态着色。
+- 修复发行版标题中的 `[...]` 被 Rich 当作样式标记解析的问题。
 
-## ⚙️ 配置提示
+## 🐛 其它修复
 
-- `palette = auto` (默认) 在**开了守护进程**时用终端自己的 16 色, 没开时用内置 Catppuccin 真彩。
-  如果你之前手动设过 `palette = mocha` 又觉得"颜色不对", 用下面这条回到跟随终端:
+- 修复同一次推送被 git 执行两遍的问题。
+- 新增 `gitx api` 直通 `gh api`（默认把限额渲染成中文表格）。
 
-  ```bash
-  gitx config set palette auto
-  ```
-
-## 📦 安装/升级
+## 📦 安装 / 升级
 
 ```bash
 gitx upgrade                                  # 已在 v1.0.5 及以后: 直接自更新
-uv tool install gitx-1.0.8-py3-none-any.whl    # 或装 wheel
-gitx daemon restart                            # 守护进程在用的话, 重启它以加载新代码
+uv tool install gitx-1.1.0rc2-py3-none-any.whl  # 或装 wheel (pre2 按 PEP 440 归一化成 rc2)
+gitx daemon restart                            # 守护进程在用的话, 重启以加载新代码
 
 # 验证
-gitx --version        # 应输出 gitx 1.0.7
-gitx daemon bench     # 看这台机器上到底省了多少
+gitx --version        # 应输出 gitx 1.1.0-pre2
 ```
 
 ## 🔗 相关
 
-- 源码: https://github.com/FLT18355/gitx/tree/v1.0.8
-- 完整变更: `git log v1.0.7..v1.0.8 --oneline`
+- 源码: https://github.com/FLT18355/gitx/tree/v1.1.0-pre2
+- 完整变更: `git log v1.1.0-pre1..v1.1.0-pre2 --oneline`
 
 ---
 
-*发布于: 2026-10-18*
+*发布于: 2026-10-27*
 
 <!-- 发布流程 (版本号双改 -> 构建 -> tag -> 建发行版 -> 上传后自检) 见 doc/发布流程.md -->

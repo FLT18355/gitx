@@ -74,12 +74,32 @@ def _brief_text(ref: str, path: str = ".") -> str:
     return f"{parts[0]} ({parts[1]}, {parts[2]}) {parts[3]}"
 
 
+def _ref_counts(path: str) -> tuple[int, int]:
+    """(本地分支数, 标签数) —— 一次 for-each-ref 拿全, 不逐个 ref 起进程."""
+    rc, out = gitcmd.capture(["git", "-C", path, "for-each-ref",
+                              "--format=%(refname)", "refs/heads", "refs/tags"])
+    if rc != 0:
+        return 0, 0
+    heads = sum(1 for line in out.splitlines() if line.startswith("refs/heads/"))
+    tags = sum(1 for line in out.splitlines() if line.startswith("refs/tags/"))
+    return heads, tags
+
+
 def info(path: str = ".") -> None:
     """gitx info [路径] —— 仓库概览."""
     gitcmd.require_repo(path)
 
     _, root = gitcmd.capture(["git", "-C", path, "rev-parse", "--show-toplevel"])
-    branch = gitcmd.current_branch(path) or "(尚无提交)"
+    upstream = gitcmd.upstream_of("HEAD", path)
+    commits = gitcmd.commit_count(path)
+    branch = gitcmd.current_branch(path)
+    if branch:
+        branch_text, branch_style = branch, "info"
+    elif commits:
+        sha = gitcmd.resolve_sha("HEAD", path)[:7] or "?"
+        branch_text, branch_style = f"(分离 HEAD @ {sha})", "warn"
+    else:
+        branch_text, branch_style = "(尚无提交)", "warn"
     remote = config.default_remote()
     fetch = gitcmd.remote_url(remote, path)
     push = gitcmd.remote_push_url(remote, path)
@@ -91,12 +111,22 @@ def info(path: str = ".") -> None:
     staged, modified, untracked, conflicts = gitcmd.status_counts(path)
     behind, ahead = gitcmd.behind_ahead(path)
     if behind < 0:
-        track = "无上游分支"
+        track, track_style = "无上游分支", "warn"
     elif not behind and not ahead:
-        track = "与远端一致"
+        track, track_style = f"{upstream} · 与远端一致", "info"
     else:
-        track = f"领先 {ahead} | 落后 {behind}" + ("   先 gitx pull 再推送" if behind else "")
+        track = f"{upstream} · 领先 {ahead} | 落后 {behind}"
+        track_style = "warn" if behind else "info"
 
+    dirty = staged or modified or untracked
+    if dirty or conflicts:
+        state = (f"暂存 {staged} | 修改 {modified} | "
+                 f"未跟踪 {untracked} | 冲突 {conflicts}")
+        state_style = "err" if conflicts else "warn"
+    else:
+        state, state_style = "干净", "info"
+
+    heads, tags = _ref_counts(path)
     cfg = config.load()
     prefix = config.active_proxy(cfg=cfg)
     speed = (f"{cfg.get('proxy')} ({prefix}) [拉取加速 / 推送直连]"
@@ -108,19 +138,28 @@ def info(path: str = ".") -> None:
 
     repo_table = console.table("项目", "值", title="仓库")
     repo_table.add_row("路径", console.txt(root or os.path.abspath(path)))
-    repo_table.add_row("分支", console.txt(branch))
+    repo_table.add_row("分支", console.txt(branch_text, branch_style))
+    repo_table.add_row("上游", console.txt(upstream or "-"))
     repo_table.add_row("远端", console.txt(remote))
-    repo_table.add_row("状态", console.txt(f"暂存 {staged} | 修改 {modified} | "
-                                          f"未跟踪 {untracked} | 冲突 {conflicts}"))
-    repo_table.add_row("对比远端", console.txt(track))
+    repo_table.add_row("状态", console.txt(state, state_style))
+    repo_table.add_row("对比远端", console.txt(track, track_style))
+    repo_table.add_row("规模", console.txt(f"提交 {commits} | 本地分支 {heads} | 标签 {tags}"))
     repo_table.add_row("最近提交", console.txt(_brief_text("HEAD", path)))
     repo_table.add_row("加速", console.txt(speed))
     console.print(repo_table)
 
     if not fetch:
         console.warn("远端: 未关联 (用 gitx push to <仓库地址> 关联)")
-    if not gitcmd.commit_brief("HEAD", path):
+    if not commits:
         console.warn("最近提交: 还没有提交")
+    if fetch and commits and upstream and behind > 0:
+        console.hint("拉取: gitx pull  |  带变基: gitx sync")
+    elif ahead > 0:
+        console.hint("推送: gitx push")
+    if conflicts:
+        console.hint("冲突: gitx status 看文件  |  gitx diff 看差异")
+    if fetch and commits and not upstream and branch:
+        console.hint(f"关联上游: gitx branch upstream {branch} --set {config.default_remote()}/{branch}")
     quotepath = gitcmd.capture(["git", "-C", path, "config", "--get", "core.quotepath"])[1]
     if quotepath not in ("false", "0", "off"):
         console.warn("中文文件名会被转义显示, 建议执行: gitx config zh")

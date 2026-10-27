@@ -36,7 +36,9 @@
 - `gitx ws owner/repo`：克隆到默认工作区并登记
 - `gitx ws add ~/code/已有克隆`：登记已有仓库
 - `gitx ws list`：查看所有登记的仓库状态（分支/改动/领先落后）
-- `gitx ws sync -j 4`：批量拉取所有仓库（并发 4）
+- `gitx ws sync -j 4`：批量拉取所有仓库（并发 4；工作区有改动 / 无上游的仓库只 fetch）
+- `gitx ws fetch`：逐个同步，表格里显示每个仓库的分支、结果与拉取的提交数
+- `gitx ws fetch --fetch-only -j 4`：只更新远端跟踪引用，不合并（适合先看落后多少）
 - `gitx ws each git status -s`：在每个仓库执行同一条命令
 - `gitx ws use <名字> [目录]`：切换或创建新的工作区
 
@@ -57,6 +59,8 @@
 
 - `gitx publish`：列出发行版
 - `gitx publish create v1.0.0 dist/* -T "标题" -F 说明.md`：创建发行版并上传附件
+- `gitx publish view v1.0.0`：状态 / 时间 / 说明 / 附件大小与下载数
+- `gitx publish view v1.0.0 --notes`：显示完整发行说明（默认只显示首行）
 - `gitx publish upload v1.0.0 dist/*.whl --clobber`：补传附件（覆盖同名）
 - `gitx publish edit v1.0.0 --no-draft`：将草稿转为正式发布
 - `gitx publish delete v1.0.0 --cleanup-tag`：删除发行版并连带删除标签
@@ -68,11 +72,19 @@
 ### `gitx repos`
 管理你的 GitHub 仓库。
 
-- `gitx repos`：交互式挑选仓库并进入编辑界面
+- `gitx repos`：交互式挑选仓库并进入编辑界面；「分支管理」可看列表、设默认、新建、删除分支
+- `gitx repos list --json`：表格或 JSON 列出仓库（标题显示生效的过滤条件）
 - `gitx repos -q dotfile`：搜索你的仓库
+- `gitx repos view owner/repo --json`：查看仓库设置与统计（★ / fork / 语言 / 标记）
 - `gitx repos starred`：浏览你收藏的仓库，支持交互式挑选或自动翻页
 - `gitx repos create my-tool --public --push`：新建仓库
 - `gitx repos delete owner/repo -y`：删除仓库（危险操作）
+
+### `gitx info`
+本地仓库概览。
+
+- `gitx info`：分支（含分离 HEAD 的提交）/ 上游 / 远端 / 改动 / 领先落后 / 提交·分支·标签数 / 最近提交
+- 检测到落后、领先、冲突或无上游时，在表格下方给出对应的下一步命令
 
 ### `gitx search` / `gitx stat`
 - `gitx search`：交互式搜仓库并选择操作

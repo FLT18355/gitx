@@ -331,9 +331,10 @@ def proxy_args(prefix: str | None) -> list[str]:
     return args
 
 
-def fetch_remote(path: str = ".", remote: str = "origin", *, prefix: str | None = None,
-                 prune: bool = False, all_remotes: bool = False, tags: bool = False) -> bool:
-    """更新远端跟踪引用; prefix 非空时走加速. all_remotes 时忽略 remote 参数."""
+def fetch_remote_detail(path: str = ".", remote: str = "origin", *, prefix: str | None = None,
+                        prune: bool = False, all_remotes: bool = False,
+                        tags: bool = False) -> tuple[bool, str]:
+    """更新远端跟踪引用, 返回 (是否成功, git 输出); prefix 非空时走加速."""
     args = ["git", "-C", path, *proxy_args(prefix), "fetch"]
     if all_remotes:
         args.append("--all")
@@ -343,7 +344,15 @@ def fetch_remote(path: str = ".", remote: str = "origin", *, prefix: str | None 
         args.append("--prune")
     if tags:
         args.append("--tags")
-    return subprocess.run(args, capture_output=True).returncode == 0
+    code, output = run_capture(args)
+    return code == 0, output
+
+
+def fetch_remote(path: str = ".", remote: str = "origin", *, prefix: str | None = None,
+                 prune: bool = False, all_remotes: bool = False, tags: bool = False) -> bool:
+    """更新远端跟踪引用; prefix 非空时走加速. all_remotes 时忽略 remote 参数."""
+    return fetch_remote_detail(path, remote, prefix=prefix, prune=prune,
+                               all_remotes=all_remotes, tags=tags)[0]
 
 
 def refspec_push(path: str, remote: str, refs: Sequence[str] = (), *,
@@ -407,9 +416,16 @@ def pull(path: str = ".", rebase: bool = False, prefix: str | None = None) -> bo
     显式传 --rebase / --no-rebase: 分支已分歧且 git 没配 pull.rebase 时,
     裸 `git pull` 会直接报 "需指定如何调和偏离的分支" 而失败 (git 2.27+ 的行为).
     """
+    return pull_capture(path, rebase=rebase, prefix=prefix)[0]
+
+
+def pull_capture(path: str = ".", rebase: bool = False,
+                 prefix: str | None = None) -> tuple[bool, str]:
+    """静默拉取并返回 (是否成功, 报错输出); 批量同步用它避免多路 git 输出互相穿插."""
     args = ["git", "-C", path, *proxy_args(prefix), "pull", "--rebase" if rebase else "--no-rebase"]
     refresh_index(path)  # 非快进的 pull 内部也会走 merge 的 save_state, 同样会踩"储藏失败"
-    return subprocess.run(args).returncode == 0
+    code, output = run_capture(args)
+    return code == 0, output
 
 
 # ---------------------------------------------------------------- 分支概览

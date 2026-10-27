@@ -100,7 +100,7 @@ gitx sync                            # 同步当前仓库
 |------|------|
 | `gitx publish [list]` | 列出发行版（含草稿与预发布）：标签/名称/状态/发布/创建 |
 | `gitx publish --no-drafts --no-prereleases` | 只看正式版 |
-| `gitx publish view [标签] [--web]` | 状态/时间/说明首行/附件清单（标签省略 = 最新） |
+| `gitx publish view [标签] [--web] [--notes]` | 状态/时间/说明/附件清单（含大小与下载数；`--notes` 看完整说明） |
 | `gitx publish create <标签> [附件...] -T 标题 -F 说明.md -p` | 创建发行版并上传附件（附件支持 `dist/*` 通配） |
 | `gitx publish create <标签> dist/* -d` | 先建草稿（`edit --no-draft` 再正式发布） |
 | `gitx publish upload <标签> <文件...> [--clobber]` | 给已有发行版补传附件 |
@@ -161,9 +161,10 @@ gitx sync                            # 同步当前仓库
 | `gitx repos` | ↑↓ 挑一个仓库（最多渲染 5 行，超出的随光标滚动，打字即筛选）→ 进**仓库编辑界面** |
 | `gitx repos -q dotfile` | 按关键词**搜**仓库（`gh search repos`，搜得到全部，不受 `-n` 限制；挑选器底部也有一条「用关键词搜全部仓库」） |
 | `gitx repos -n 5` | 只取最近 5 个仓库来挑（`-o` 看别人的仓库；`--visibility` / `-l` / `-t` / `--source` / `--fork` / `--no-archived` 过滤；`--fresh` 不吃缓存） |
+| 交互界面 ·「分支管理」 | 列出远端分支（提交短哈希 / 默认 / 受保护）；可设默认分支、从现有分支新建、删除非默认且非受保护的分支 |
 | `gitx repos edit [owner/repo]` | 跳过挑选直接进编辑界面；非交互则给选项：`-d` 描述 / `-H` 主页 / `-t`·`--remove-topic` 话题 / `--visibility` / `-b` 默认分支 / `--template`+`--no-template` / `--issues`·`--wiki`·`--projects`·`--discussions` |
-| `gitx repos list [-n 30]` | 表格列出仓库：仓库 / 描述 / 可见性 / ★ / 语言 / 更新 / 标记 |
-| `gitx repos view [owner/repo] [--web]` | 看当前设置（描述 / 主页 / 话题 / 可见性 / 默认分支 / 功能 / 模板 / star） |
+| `gitx repos list [-n 30] [--json]` | 表格列出仓库：仓库（可点击）/ 描述 / 可见性 / ★ / 语言 / 更新 / 标记；标题显示生效的过滤条件，条数打满 `-n` 时提示可能还有更多 |
+| `gitx repos view [owner/repo] [--web] [--json]` | 看当前设置（描述 / 主页 / 话题 / 可见性 / 默认分支 / 功能 / 模板 / ★ / fork / 语言 / 标记） |
 | `gitx repos clone [owner/repo] [-D 目录] [-d 深度]` | 克隆到本地（公开走加速，私有仓库交给 gh 克隆——加速镜像拉私有仓库会失败，推送仍直连） |
 | `gitx repos create <名字> [--source . --push]` | 新建仓库（`-d` / `-H` / `--visibility` / `--readme` / `-g` / `--license` / `-p` 模板 / `--no-issues` / `--no-wiki` / `--team`） |
 | `gitx repos fork [owner/repo] [-c]` | 复刻到自己的账号（`--org` / `--fork-name` / `--default-branch-only` / `--remote`） |
@@ -176,7 +177,8 @@ gitx sync                            # 同步当前仓库
 | `gitx repos delete [owner/repo] [-y]` | 删除仓库（不可恢复，需要 delete_repo 权限） |
 
 > 编辑界面每轮都重画一遍当前设置：改描述 / 主页 / 话题 / 可见性 / 默认分支 / 功能开关 / 模板 /
-> 归档 / 收藏 / 改名 / 克隆 / 打开网页 / 设为默认 / 删除，选「完成」退出。
+> 归档 / 收藏 / 改名 / 克隆 / 打开网页 / 设为默认 / 删除，选「完成」退出；「分支管理」里可
+> 设默认分支、从任一现有分支新建、删除非默认且非受保护的分支。
 > 每项都走 `gh repo edit` 且**只带变了的参数**（描述给原样不发请求，想清空就把内容删干净再回车）；
 > 改可见性先提示副作用（掉 star / 断复刻关系）并要求确认。
 > 所有子命令的仓库参数都可省略 —— 省略时先弹同一个挑选器，条数由 `-n` 决定（如 `gitx repos -n 5 delete`）。
@@ -201,7 +203,7 @@ gitx sync                            # 同步当前仓库
 | 命令 | 说明 |
 |------|------|
 | `gitx init <项目名> [--no-zh]` | 初始化（main 分支 + 中文友好配置） |
-| `gitx info` | 仓库概览：状态/领先落后/最近提交/加速状态 |
+| `gitx info` | 仓库概览：分支/上游/改动/领先落后/提交·分支·标签数/最近提交/加速状态 |
 | `gitx graph [-n 30] [--all]` | 图形化提交历史（git log 上色版） |
 | `gitx tidy [--prune] [--gc [--aggressive]]` | 体检：体积/已合并分支/打包瘦身 |
 | `gitx url [accel\|https\|ssh] [-r 远程]` | 查看/切换远端地址形态 |

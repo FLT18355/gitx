@@ -72,7 +72,7 @@
 ### `gitx repos`
 管理你的 GitHub 仓库。
 
-- `gitx repos`：交互式挑选仓库并进入编辑界面
+- `gitx repos`：交互式挑选仓库并进入编辑界面；「分支管理」可看列表、设默认、新建、删除分支
 - `gitx repos list --json`：表格或 JSON 列出仓库（标题显示生效的过滤条件）
 - `gitx repos -q dotfile`：搜索你的仓库
 - `gitx repos view owner/repo --json`：查看仓库设置与统计（★ / fork / 语言 / 标记）

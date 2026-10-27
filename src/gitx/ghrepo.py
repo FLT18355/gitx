@@ -24,7 +24,9 @@
 
 from __future__ import annotations
 
+import json
 import os
+import urllib.parse
 
 from rich.text import Text
 
@@ -938,20 +940,39 @@ def _private(nwo: str) -> bool:
 
 # ---------------------------------------------------------------- 仓库编辑界面
 
+def fetch_branches(nwo: str, *, fresh: bool = False) -> list[dict]:
+    """远端分支列表: [{name, sha, protected}]; 拿不到返回空表."""
+    key = f"{_BRANCHES_PREFIX}{nwo}"
+    hit = _recall(key, fresh=fresh)
+    if isinstance(hit, list) and all(isinstance(item, dict) for item in hit):
+        return hit
+    gh = _gh()
+    code, out, err = ghcli.capture(
+        gh, ["api", f"repos/{nwo}/branches", "--paginate", "--jq",
+             ".[] | {name: .name, sha: .commit.sha, protected: .protected}"])
+    if code != 0:
+        console.warn(f"读取分支失败: {err or '未知错误'}")
+        return []
+    branches: list[dict] = []
+    for line in out.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            item = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(item, dict) and item.get("name"):
+            branches.append({"name": str(item["name"]), "sha": str(item.get("sha") or ""),
+                             "protected": bool(item.get("protected"))})
+    _remember(key, branches)
+    return branches
+
+
 def _branches(nwo: str) -> list[str]:
     """仓库的分支名 (拿不到就返回空表, 由调用方退化成手输)."""
-    key = f"{_BRANCHES_PREFIX}{nwo}"
-    hit = _recall(key, fresh=False)
-    if isinstance(hit, list):
-        return [str(name) for name in hit]
-    gh = _gh()
-    code, out, _ = ghcli.capture(gh, ["api", f"repos/{nwo}/branches", "--paginate",
-                                      "--jq", ".[].name"])
-    if code != 0:
-        return []
-    names = [line.strip() for line in out.splitlines() if line.strip()]
-    _remember(key, names)
-    return names
+    return [str(item["name"]) for item in fetch_branches(nwo)
+            if item.get("name")]
 
 
 def _ask_text(prompt: str, current: str) -> str | None:
@@ -1029,6 +1050,136 @@ def _act_branch(nwo: str, repo: dict) -> None:
     edit(nwo, default_branch=branches[index])
 
 
+_BRANCH_ACTIONS: tuple[tuple[str, str], ...] = (
+    ("default", "设为默认分支"),
+    ("create", "新建分支 (从现有分支复制提交)"),
+    ("delete", "删除分支 (默认 / 受保护分支除外)"),
+    ("back", "返回仓库设置"),
+)
+
+
+def _valid_branch_name(name: str) -> bool:
+    """本地先挡掉一眼不合法的分支名; 最终规则仍以 GitHub 的校验为准."""
+    if not name or name.startswith(("-", "/", ".")) or name.endswith(("/", ".", ".lock")):
+        return False
+    if ".." in name or "@{" in name or "//" in name or "\\" in name:
+        return False
+    return not any(ch in name for ch in " ~^:?*[")
+
+
+def _branch_label(item: dict, default: str) -> str:
+    marks = []
+    if item.get("name") == default:
+        marks.append("默认")
+    if item.get("protected"):
+        marks.append("受保护")
+    sha = str(item.get("sha") or "")[:7]
+    return f"{item.get('name') or ''}  {sha or '-'}" + (f"  ({' / '.join(marks)})" if marks else "")
+
+
+def _branch_manager(nwo: str, repo: dict) -> dict:
+    """交互式分支管理: 列表 / 设默认 / 新建 / 删除; 返回刷新后的仓库."""
+    if not repo.get("viewerCanAdminister"):
+        console.warn("没有管理权限, 不能管理分支")
+        return repo
+    changed = False
+    fresh = True
+    while True:
+        branches = fetch_branches(nwo, fresh=fresh)
+        fresh = False
+        if not branches:
+            console.warn("没有取到分支 (检查网络 / 权限)")
+            break
+        default = _branch_of(repo)
+        ordered = sorted(branches, key=lambda item: (item.get("name") != default,
+                                                     str(item.get("name") or "")))
+        table = console.table("分支", "提交", "标记", title=f"{nwo} 分支 {len(ordered)} 个")
+        for item in ordered:
+            marks = []
+            if item.get("name") == default:
+                marks.append("默认")
+            if item.get("protected"):
+                marks.append("受保护")
+            table.add_row(console.txt(item.get("name") or ""),
+                          console.txt(str(item.get("sha") or "")[:7] or "-"),
+                          console.txt(" / ".join(marks) or "-"))
+        console.print(table)
+        index = console.select("分支管理", [label for _, label in _BRANCH_ACTIONS],
+                               instruction="[↑↓] 选择  [输入] 筛选  [回车] 确认")
+        if index is None or _BRANCH_ACTIONS[index][0] == "back":
+            break
+        action = _BRANCH_ACTIONS[index][0]
+        if action == "default":
+            candidates = [item for item in ordered if item.get("name") != default]
+            if not candidates:
+                console.info("没有其它分支, 默认分支保持不变")
+                continue
+            pick = console.select("新的默认分支", [_branch_label(item, default) for item in candidates],
+                                  instruction="[↑↓] 选择  [输入] 筛选  [回车] 确认")
+            if pick is None:
+                continue
+            name = str(candidates[pick].get("name") or "")
+            if not console.ask(f"把 {nwo} 的默认分支改为 {name}?", default=True):
+                console.warn("已取消")
+                continue
+            edit(nwo, default_branch=name)
+            repo = fetch_repo(nwo)
+            changed = True
+            fresh = True
+        elif action == "create":
+            name = console.text("新分支名 (不含 refs/heads/)", instruction="[回车] 取消")
+            if name is None:
+                continue
+            name = name.strip()
+            if not name:
+                continue
+            if not _valid_branch_name(name):
+                console.warn("分支名不合法 (不能含空格 / .. / // / ~^:?*[ 等字符)")
+                continue
+            if any(item.get("name") == name for item in branches):
+                console.warn(f"分支 {name} 已存在")
+                continue
+            pick = console.select("从哪个分支创建?",
+                                  [_branch_label(item, default) for item in ordered],
+                                  instruction="[↑↓] 选择  [输入] 筛选  [回车] 确认")
+            if pick is None:
+                continue
+            base = ordered[pick]
+            sha = str(base.get("sha") or "")
+            if not sha:
+                console.warn("取不到基础分支的提交号, 无法新建")
+                continue
+            gh = _gh()
+            console.step(f"新建分支 {name} (基于 {base.get('name')} {sha[:7]}) ...")
+            ghcli.run(gh, ["api", "--silent", "-X", "POST", f"repos/{nwo}/git/refs",
+                           "-f", f"ref=refs/heads/{name}", "-f", f"sha={sha}"], "新建分支")
+            _forget()
+            fresh = True
+            console.done(f"已创建分支 {name}")
+        elif action == "delete":
+            candidates = [item for item in ordered
+                          if item.get("name") != default and not item.get("protected")]
+            if not candidates:
+                console.info("没有可删除的分支 (默认分支与受保护分支不动)")
+                continue
+            pick = console.select("删除哪个分支?", [_branch_label(item, default) for item in candidates],
+                                  instruction="[↑↓] 选择  [输入] 筛选  [回车] 确认")
+            if pick is None:
+                continue
+            name = str(candidates[pick].get("name") or "")
+            if not console.ask(f"删除远端分支 {name}? 不可恢复", default=False):
+                console.warn("已取消")
+                continue
+            gh = _gh()
+            path = urllib.parse.quote(name, safe="/")
+            ghcli.run(gh, ["api", "--silent", "-X", "DELETE",
+                           f"repos/{nwo}/git/refs/heads/{path}"], "删除分支")
+            _forget()
+            fresh = True
+            console.done(f"已删除分支 {name}")
+    return fetch_repo(nwo) if changed else repo
+
+
 def _act_features(nwo: str, repo: dict) -> None:
     labels = [f"{zh} ({'开' if repo.get(field) else '关'})" for field, _, zh in _FEATURES]
     picked = console.check("要打开哪些功能? (空格勾选 / 取消)", labels,
@@ -1077,7 +1228,8 @@ _ACTIONS: tuple[tuple[str, str], ...] = (
     ("homepage", "改主页"),
     ("topics", "改话题 (topics)"),
     ("visibility", "改可见性 (公开 / 私有 / 内部)"),
-    ("branch", "改默认分支"),
+    ("branch", "设默认分支 (快速)"),
+    ("branches", "分支管理 (列表 / 新建 / 删除)"),
     ("features", "功能开关 (议题 / Wiki / 项目 / 讨论)"),
     ("template", "模板仓库开关"),
     ("archive", "归档 / 取消归档"),
@@ -1104,6 +1256,8 @@ def _act(action: str, repo: dict) -> dict | None:
         _act_visibility(nwo, repo)
     elif action == "branch":
         _act_branch(nwo, repo)
+    elif action == "branches":
+        return _branch_manager(nwo, repo)
     elif action == "features":
         _act_features(nwo, repo)
     elif action == "template":

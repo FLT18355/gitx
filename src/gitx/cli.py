@@ -1267,9 +1267,10 @@ def publish_view(
     tag: Annotated[str, typer.Argument(metavar="标签", help="发行版标签; 留空 = 最新")] = "",
     repo: Annotated[str, typer.Option("--repo", "-R", help=_REPO_HELP)] = "",
     web: Annotated[bool, typer.Option("--web", "-w", help="在浏览器中打开发行版页面")] = False,
+    notes: Annotated[bool, typer.Option("--notes", "-n", help="显示完整说明 (默认只显示首行)")] = False,
 ) -> None:
-    """查看发行版: 状态 / 时间 / 说明首行 / 附件清单."""
-    publish.view(tag, repo, browse=web)
+    """查看发行版: 状态 / 时间 / 说明 / 附件清单 (附件含下载数)."""
+    publish.view(tag, repo, browse=web, notes=notes)
 
 
 @publish_app.command("create")

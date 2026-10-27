@@ -59,6 +59,8 @@
 
 - `gitx publish`：列出发行版
 - `gitx publish create v1.0.0 dist/* -T "标题" -F 说明.md`：创建发行版并上传附件
+- `gitx publish view v1.0.0`：状态 / 时间 / 说明 / 附件大小与下载数
+- `gitx publish view v1.0.0 --notes`：显示完整发行说明（默认只显示首行）
 - `gitx publish upload v1.0.0 dist/*.whl --clobber`：补传附件（覆盖同名）
 - `gitx publish edit v1.0.0 --no-draft`：将草稿转为正式发布
 - `gitx publish delete v1.0.0 --cleanup-tag`：删除发行版并连带删除标签
@@ -75,6 +77,12 @@
 - `gitx repos starred`：浏览你收藏的仓库，支持交互式挑选或自动翻页
 - `gitx repos create my-tool --public --push`：新建仓库
 - `gitx repos delete owner/repo -y`：删除仓库（危险操作）
+
+### `gitx info`
+本地仓库概览。
+
+- `gitx info`：分支（含分离 HEAD 的提交）/ 上游 / 远端 / 改动 / 领先落后 / 提交·分支·标签数 / 最近提交
+- 检测到落后、领先、冲突或无上游时，在表格下方给出对应的下一步命令
 
 ### `gitx search` / `gitx stat`
 - `gitx search`：交互式搜仓库并选择操作

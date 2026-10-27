@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import os
 
+from rich.text import Text
+
 from . import cache, console, ghcli
 
 LIST_FIELDS = "tagName,name,isDraft,isPrerelease,isLatest,createdAt,publishedAt"
@@ -63,12 +65,20 @@ def list_releases(target: str = "", *, limit: int = 30,
         table.add_row(
             console.txt(rel.get("tagName") or ""),
             console.txt(str(rel.get("name") or "")[:48]),
-            console.txt(_state(rel)),
+            console.txt(_state(rel), _state_style(rel)),
             console.txt(str(rel.get("publishedAt") or "")[:10] or "-"),
             console.txt(str(rel.get("createdAt") or "")[:10]),
         )
     console.print(table)
     console.info("看详情: gitx publish view <标签>   |   发布草稿: gitx publish edit <标签> --no-draft")
+
+
+def _state_style(rel: dict) -> str:
+    if rel.get("isDraft"):
+        return "warn"
+    if rel.get("isPrerelease"):
+        return "warn"
+    return "ok" if rel.get("isLatest") else ""
 
 
 def _state(rel: dict) -> str:
@@ -79,8 +89,8 @@ def _state(rel: dict) -> str:
     return "最新" if rel.get("isLatest") else "正式"
 
 
-def view(tag: str = "", target: str = "", *, browse: bool = False) -> None:
-    """查看单个发行版: 状态 / 时间 / 说明首行 / 附件清单 (--web 交给 gh 打开网页)."""
+def view(tag: str = "", target: str = "", *, browse: bool = False, notes: bool = False) -> None:
+    """查看单个发行版: 状态 / 时间 / 说明 / 附件清单 (--web 交给 gh 打开网页)."""
     gh = _gh()
     args = ["release", "view", *([tag] if tag else []), *ghcli.repo_args(target)]
     if browse:
@@ -89,25 +99,38 @@ def view(tag: str = "", target: str = "", *, browse: bool = False) -> None:
     rel = ghcli.json_out(gh, [*args, "--json", VIEW_FIELDS], "查看发行版")
     if not isinstance(rel, dict):
         console.error("发行版数据异常, 请稍后重试")
-    head = f"[key]{rel.get('tagName') or tag or '(最新)'}[/key]  {rel.get('name') or ''!s}".rstrip()
-    console.print(console.styled(f"{head}  [dim]({_state(rel)})[/dim]"))
+    head = Text()
+    head.append(str(rel.get("tagName") or tag or "(最新)"), style="key")
+    name = str(rel.get("name") or "")
+    if name:
+        head.append(f"  {name}")
+    head.append(f"  ({_state(rel)})", style="dim")
+    console.print(head)
     console.print(console.txt(
         f"发布: {str(rel.get('publishedAt') or '')[:10] or '-'}    "
         f"目标: {rel.get('targetCommitish') or '-'}"))
     if rel.get("url"):
         console.print(console.link(str(rel["url"]), str(rel["url"])))
     body = str(rel.get("body") or "").strip()
-    console.print(console.txt(body.splitlines()[0][:120] if body else "(没有说明)"))
+    if notes:
+        console.print(console.txt(body or "(没有说明)"))
+    else:
+        console.print(console.txt(body.splitlines()[0][:120] if body else "(没有说明)"))
     assets = list(rel.get("assets") or [])
     if assets:
-        table = console.table("#", "附件", "大小", title=f"附件 {len(assets)} 个")
+        table = console.table("#", "附件", "大小", "下载", title=f"附件 {len(assets)} 个")
         for i, asset in enumerate(assets, 1):
             table.add_row(console.txt(i), console.txt(asset.get("name") or ""),
-                          console.txt(console.human_size(int(asset.get("size") or 0))))
+                          console.txt(console.human_size(int(asset.get("size") or 0))),
+                          console.txt(asset.get("downloadCount") if asset.get("downloadCount") is not None else "-"))
         console.print(table)
     else:
         console.warn("附件 0 个 (只有源码包)")
-    console.info(f"下载附件: gitx release <仓库> --tag {rel.get('tagName') or tag}")
+    shown_tag = str(rel.get("tagName") or tag or "")
+    if not notes and body and len(body.splitlines()) > 1:
+        console.info(f"完整说明: gitx publish view {shown_tag} --notes" if shown_tag
+                     else "完整说明: gitx publish view <标签> --notes")
+    console.info(f"下载附件: gitx release <仓库> --tag {shown_tag or '<标签>'}")
 
 
 # ---------------------------------------------------------------- 写操作

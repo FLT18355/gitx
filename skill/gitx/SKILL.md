@@ -100,7 +100,7 @@ gitx sync                            # 同步当前仓库
 |------|------|
 | `gitx publish [list]` | 列出发行版（含草稿与预发布）：标签/名称/状态/发布/创建 |
 | `gitx publish --no-drafts --no-prereleases` | 只看正式版 |
-| `gitx publish view [标签] [--web]` | 状态/时间/说明首行/附件清单（标签省略 = 最新） |
+| `gitx publish view [标签] [--web] [--notes]` | 状态/时间/说明/附件清单（含大小与下载数；`--notes` 看完整说明） |
 | `gitx publish create <标签> [附件...] -T 标题 -F 说明.md -p` | 创建发行版并上传附件（附件支持 `dist/*` 通配） |
 | `gitx publish create <标签> dist/* -d` | 先建草稿（`edit --no-draft` 再正式发布） |
 | `gitx publish upload <标签> <文件...> [--clobber]` | 给已有发行版补传附件 |
@@ -201,7 +201,7 @@ gitx sync                            # 同步当前仓库
 | 命令 | 说明 |
 |------|------|
 | `gitx init <项目名> [--no-zh]` | 初始化（main 分支 + 中文友好配置） |
-| `gitx info` | 仓库概览：状态/领先落后/最近提交/加速状态 |
+| `gitx info` | 仓库概览：分支/上游/改动/领先落后/提交·分支·标签数/最近提交/加速状态 |
 | `gitx graph [-n 30] [--all]` | 图形化提交历史（git log 上色版） |
 | `gitx tidy [--prune] [--gc [--aggressive]]` | 体检：体积/已合并分支/打包瘦身 |
 | `gitx url [accel\|https\|ssh] [-r 远程]` | 查看/切换远端地址形态 |

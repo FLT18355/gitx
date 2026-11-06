@@ -2,7 +2,9 @@
 
 **给中国人用的 GitHub 加速与同步工具 —— 下载 / 同步 / 加速，一条命令搞定。**
 
-**本项目推荐和我的另外一个项目gitx-tui配合使用**
+### **注意, 本项目最近可能不会再更新, 因为我已经把重心移动到了FLT18355/gitx-tui上面, 感兴趣的可以去看看。**
+
+**本项目推荐和我的另外一个项目gitx-tui配合使用。**
 
 [![GitHub last commit](https://img.shields.io/github/last-commit/FLT18355/gitx?style=flat-square&color=89b4fa&logo=github)](https://github.com/FLT18355/gitx)
 [![GitHub repo size](https://img.shields.io/github/repo-size/FLT18355/gitx?style=flat-square&color=cba6f7)](https://github.com/FLT18355/gitx)

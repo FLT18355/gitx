@@ -39,7 +39,7 @@ uv run gitx -h
 
 ```bash
 gitx doctor          # 环境自检: git / gh / token / 仓库 / 加速源 / 编码
-gitx https://github.com/git/git   # 实测下载 (默认走加速镜像, 浅克隆)
+gitx https://github.com/git/git   # 实测下载 (默认走加速镜像, 完整历史)
 ```
 
 ## 可选：加速源

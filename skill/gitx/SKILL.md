@@ -1,6 +1,6 @@
 ---
 name: gitx
-version: 1.1.0-pre2
+version: 1.1.0-pre2.post1
 description: 给中国人用的 GitHub 加速与同步工具 —— 下载 / 同步 / 加速 / 分支 / 暂存 / 标签 / 提交 / 改动 / 发行版 / Actions / 账号 / 我的仓库，一条命令搞定
 author: FLT18355
 repository: https://github.com/FLT18355/gitx
@@ -66,7 +66,7 @@ gitx sync                            # 同步当前仓库
 
 | 命令 | 说明 |
 |------|------|
-| `gitx <URL>` | 仓库浅克隆到当前目录 |
+| `gitx <URL>` | 仓库完整克隆到当前目录（带全部历史） |
 | `gitx owner/repo` | 同上，链接可省成 `owner/repo`（`gitx cli/cli`） |
 | `gitx <URL> -x` | 下载源码包 tar.gz（无历史，最快） |
 | `gitx <URL> -X` | 下载并解压 |
@@ -454,7 +454,6 @@ GITX_RELEASE_PROXY=off|v6|v4|gh-proxy|...
 |----|--------|------|
 | `proxy` | `v6` | 全局加速源 |
 | `release_proxy` | 跟随 `proxy` | Release 专用加速源 |
-| `depth` | `1` | 克隆深度（`0` = 完整克隆） |
 | `branch` | 远端默认分支 | 下载时 URL 未带分支的默认分支 |
 | `dest` | 当前目录 | 默认下载目录（支持 `~`） |
 | `resume` | `true` | 断点续传开关 |

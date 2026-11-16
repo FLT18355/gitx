@@ -904,7 +904,7 @@ def fork(target: str, *, clone_: bool = False, remote: bool = False, org: str = 
     console.done(f"{nwo} 已复刻")
 
 
-def clone(target: str, dest: str = "", *, depth: int = 1, repo: dict | None = None) -> None:
+def clone(target: str, dest: str = "", *, depth: int = 0, repo: dict | None = None) -> None:
     """克隆到本地: 公开仓库[info]和 gitx download 一样走加速[/info], 私有仓库交给 gh (它自带凭据, 加速镜像拉私有仓库会失败).
 
     repo 已知 (挑选器 / 收藏浏览) 时直接看它的 visibility, 少跑一次 `gh repo view`。

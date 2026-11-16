@@ -1,7 +1,7 @@
 """下载 GitHub 仓库 / 文件夹 / 文件 / 源码包 (默认走加速).
 
 四条路径, 按"要多少拿多少"选最省的一条:
-  整仓库   git clone --depth N                      (默认浅克隆)
+  整仓库   git clone [--depth N]                    (默认完整历史)
   文件夹   git clone --filter=blob:none --sparse    (只取该目录的 blob, 实测快 8 倍)
   单个文件 raw 直取 (可断点续传)
   源码包   API /tarball/<ref> 单个 HTTP 流          (不要 git 历史时最快)
@@ -15,7 +15,7 @@ import subprocess
 from . import accel, config, console, gitcmd, github, net
 
 
-def download(url: str, dest: str, prefix: str | None, depth: int = 1, branch: str = "",
+def download(url: str, dest: str, prefix: str | None, depth: int = 0, branch: str = "",
              *, archive: bool = False, extract: bool = False, submodules: bool = False,
              resume: bool = True) -> None:
     """入口: 解析链接后分发 (链接已在调用方解析过时, 直接用 run)."""
@@ -23,7 +23,7 @@ def download(url: str, dest: str, prefix: str | None, depth: int = 1, branch: st
         archive=archive, extract=extract, submodules=submodules, resume=resume)
 
 
-def run(info: dict, dest: str, prefix: str | None, depth: int = 1, branch: str = "",
+def run(info: dict, dest: str, prefix: str | None, depth: int = 0, branch: str = "",
         *, archive: bool = False, extract: bool = False, submodules: bool = False,
         resume: bool = True) -> None:
     """按已解析的 info 分发 (info 见 github.parse_url)."""

@@ -183,7 +183,8 @@ def download_cmd(
         metavar="URL|路径...",
         help="一个或多个 GitHub 链接 (也可写 owner/repo); 只给一个链接时, 第二个参数可当保存路径")] = None,
     branch: Annotated[str, typer.Option("--branch", "-b", help="指定分支")] = "",
-    depth: Annotated[int | None, typer.Option("--depth", "-d", help="克隆深度, 0 = 完整克隆")] = None,
+    depth: Annotated[int | None, typer.Option(
+        "--depth", "-d", help="克隆深度, 0 = 完整历史 (默认), N = 只取最近 N 个提交")] = None,
     archive: Annotated[bool, typer.Option("--archive", "-x", "--tarball",
                                           help="下载源码包 tar.gz, 不用 git (不要历史时最快)")] = False,
     extract: Annotated[bool, typer.Option("--extract", "-X", help="下载源码包并直接解压 (隐含 -x)")] = False,
@@ -202,7 +203,7 @@ def download_cmd(
 ) -> None:
     """下载仓库 / 文件夹 / 单个文件 / 源码包 / Release 附件, [info]默认走加速[/info].
 
-    要历史用 [key]git clone[/key] 路线 (浅克隆), 只要文件树用 [key]-x[/key] 源码包路线,
+    默认完整克隆 (带全部历史); 只要文件树用 [key]-x[/key] 源码包路线,
     只要某个目录用 [key]tree[/key] 链接 (部分克隆 + 稀疏检出), 单个文件用 [key]blob[/key] 链接。
 
     可以一次给多个链接 (逐个下载, 单个失败不影响其余的), 也可以 [key]-f[/key] 从文本文件读;
@@ -1514,7 +1515,7 @@ def repos_view(
 def repos_clone(
     target: Annotated[str, typer.Argument(metavar="[仓库]", help=_REPO_ARG)] = "",
     dest: Annotated[str, typer.Option("--dir", "-D", help="放到哪个目录")] = "",
-    depth: Annotated[int, typer.Option("--depth", "-d", help="克隆深度, 0 = 完整克隆")] = 1,
+    depth: Annotated[int, typer.Option("--depth", "-d", help="克隆深度, 0 = 完整历史 (默认), N = 只取最近 N 个提交")] = 0,
 ) -> None:
     """克隆到本地 ([info]公开仓库和 gitx download 一样走加速[/info]; 私有仓库交给 gh, 它自带凭据)."""
     ghrepo.clone(_pick_target(target, "clone"), dest, depth=depth)
@@ -2153,7 +2154,8 @@ def ws_clone(
     ctx: typer.Context,
     target: Annotated[str, typer.Argument(metavar="仓库|链接", help="owner/repo 或 GitHub 链接")],
     dest: Annotated[str, typer.Argument(metavar="[目录]", help="克隆到哪个目录; 已存在的目录视为父目录")] = "",
-    depth: Annotated[int | None, typer.Option("--depth", "-d", help="克隆深度, 0 = 完整克隆")] = None,
+    depth: Annotated[int | None, typer.Option(
+        "--depth", "-d", help="克隆深度, 0 = 完整历史 (默认), N = 只取最近 N 个提交")] = None,
     branch: Annotated[str, typer.Option("--branch", "-b", help="指定分支")] = "",
     submodules: Annotated[bool, typer.Option("--submodules", help="连同子模组一起拉取")] = False,
     root_override: Annotated[str, typer.Option("--root", help="本次使用的工作区根目录")] = "",
@@ -2749,7 +2751,7 @@ def _do_download(url: str, dest: str | None, depth: int | None, branch: str,
     target = dest or (os.path.join(base, item_name) if base else item_name)
     _clear_dest(target)
     if depth is None:
-        depth = int(cfg.get("depth", 1) or 1)
+        depth = 0
     download.run(info, target, prefix, depth, branch,
                  archive=archive, extract=extract, submodules=submodules,
                  resume=not fresh and bool(cfg.get("resume", True)))

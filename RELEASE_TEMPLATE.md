@@ -1,55 +1,40 @@
-# gitx v1.1.0-pre2 发布说明
+# gitx v1.1.0-pre2b 发布说明
 
-v1.1.0 的第二个预览版，重点改进工作区批量同步、`gitx repos` 仓库管理、本地仓库概览与发行版查看。
+v1.1.0 的第二个预览版修复重发：克隆默认取完整历史，文档改为纯 git 管理。
 
-## 🚀 工作区
+## 🐛 克隆历史
 
-- `gitx ws fetch` / `gitx ws sync` 输出改为「名称 / 分支 / 结果 / 说明」，说明列直接给出
-  `拉取 2 个提交 (变基)`、`落后 1 个提交`、`仅 fetch（工作区有改动）` 等信息。
-- 汇总行显示各状态数量与耗时；失败时直接显示 git 的 fatal 行，变基冲突提示继续 / 放弃命令。
-- 并行同步改为先完成先回收，不再按 fork 顺序阻塞等待；最终结果仍按清单顺序输出。
-- 批量拉取静默捕获 git 输出，避免多个仓库的进度与报错互相穿插。
+- 修复 `gitx owner/repo` / `gitx download` 克隆出的仓库历史不完整：默认不再浅克隆，
+  直接取全部历史；需要浅克隆时显式传 `--depth N`（只取最近 N 个提交）。
+- `gitx ws clone` / `gitx repos clone` 同步改为默认完整历史；移除配置项 `depth`
+  （旧配置里的 `depth` 会被忽略，浅克隆改用 `--depth N`）。
 
-## 🗂️ 仓库管理 (`gitx repos`)
+## 📚 文档
 
-- 交互界面新增「分支管理」：列出远端分支（提交短哈希 / 默认 / 受保护），可设默认分支、
-  从任一现有分支新建、删除非默认且非受保护的分支。
-- `repos list` 仓库名可点击；标题显示生效的过滤条件；条数打满 `-n` 时提示可能还有更多。
-- `repos list` / `repos view` 新增 `--json`，JSON 模式不混入进度提示，方便脚本解析。
-- `--archived` 与 `--no-archived`、`--source` 与 `--fork` 互斥，提前给出中文错误。
-- 交互界面克隆时复用已知可见性，少跑一次 `gh repo view`；克隆 / 打开网页 / 设默认后不再多余刷新。
-- `repos view` 增加 ★ / fork / 语言 / 标记统计。
-
-## 📊 仓库概览与发行版
-
-- `gitx info` 修复 jj / 分离 HEAD 下误报「尚无提交」；新增上游、提交 / 分支 / 标签数，
-  并按落后、领先、冲突、无上游给出对应的下一步命令。
-- `gitx publish view` 附件表新增下载数；`--notes` 查看完整发行说明；草稿 / 预发布 / 最新状态着色。
-- 修复发行版标题中的 `[...]` 被 Rich 当作样式标记解析的问题。
-
-## 🐛 其它修复
-
-- 修复同一次推送被 git 执行两遍的问题。
-- 新增 `gitx api` 直通 `gh api`（默认把限额渲染成中文表格）。
+- 去除 `jj` 管理说明：发布流程、开发约定与 README 统一为 `git`（提交 / 分支 / 标签）。
+- 克隆相关文案更新为「默认完整历史」，浅克隆需显式 `--depth N`。
 
 ## 📦 安装 / 升级
 
 ```bash
-gitx upgrade                                  # 已在 v1.0.5 及以后: 直接自更新
-uv tool install gitx-1.1.0rc2-py3-none-any.whl  # 或装 wheel (pre2 按 PEP 440 归一化成 rc2)
-gitx daemon restart                            # 守护进程在用的话, 重启以加载新代码
+gitx upgrade                                  # 已在旧版预览版: 加 --force 可强制重装
+uv tool install gitx-1.1.0rc2.post1-py3-none-any.whl
+gitx daemon restart                           # 守护进程在用的话, 重启以加载新代码
 
 # 验证
-gitx --version        # 应输出 gitx 1.1.0-pre2
+gitx --version        # 应输出 gitx 1.1.0-pre2.post1
 ```
+
+> 标签写作 `v1.1.0-pre2b`；PEP 440 不接受 `pre2b`，因此包版本归一化为
+> `1.1.0-pre2.post1`，构建出的附件名是 `gitx-1.1.0rc2.post1*`。
 
 ## 🔗 相关
 
-- 源码: https://github.com/FLT18355/gitx/tree/v1.1.0-pre2
-- 完整变更: `git log v1.1.0-pre1..v1.1.0-pre2 --oneline`
+- 源码: https://github.com/FLT18355/gitx/tree/v1.1.0-pre2b
+- 完整变更: `git log v1.1.0-pre2..v1.1.0-pre2b --oneline`
 
 ---
 
-*发布于: 2026-10-27*
+*发布于: 2026-11-16*
 
 <!-- 发布流程 (版本号双改 -> 构建 -> tag -> 建发行版 -> 上传后自检) 见 doc/发布流程.md -->

@@ -21,7 +21,7 @@
 
 ## ✨ 核心亮点
 
-- ⚡ **下载提速**：默认加速拉取，支持源码包、单文件、只下子目录（部分克隆快 8 倍）、断点续传。
+- ⚡ **下载提速**：默认加速拉取，克隆默认带完整历史，支持源码包、单文件、只下子目录（部分克隆快 8 倍）、断点续传。
 - 🔍 **交互探索**：`gitx search` 交互式搜仓库，上下键选择，挑完直接下载或看概览。
 - 📦 **仓库管理**：`gitx repos` 终端内直接改仓库设置（描述/话题/可见性/分支），分支可设默认、新建、删除。
 - 🚀 **发版与 CI**：`gitx publish` 一条命令发布 Release，`gitx actions` 终端内盯 CI 进度。
@@ -47,7 +47,7 @@
 ## 🚀 快速上手 (Quick Start)
 
 ### 1. 下载仓库与文件
-- **克隆仓库**：`gitx https://github.com/owner/repo` （默认浅克隆，走加速）
+- **克隆仓库**：`gitx https://github.com/owner/repo` （默认完整历史，走加速）
 - **省略协议头**：`gitx owner/repo` （直接下载）
 - **只下子目录**：`gitx https://github.com/owner/repo/tree/main/src` （极速，只拉取目标目录）
 - **交互式下附件**：`gitx release owner/repo`
@@ -90,7 +90,7 @@
 代码静态检查使用 `uvx ruff check src/gitx`。
 构建发布用的 wheel 和源码包使用 `uv build --out-dir dist`。
 
-> **注意**：本仓库的版本管理与提交使用 `jj` (colocated: `.jj/` 与 `.git/` 并存)，写操作请勿直接使用 git 命令。
+> **注意**：本仓库只用 `git` 管理版本，提交、分支与标签一律用 git 命令。
 
 ## 🙏 致谢与声明
 

@@ -18,7 +18,6 @@ from . import accel, console
 DEFAULTS: dict[str, object] = {
     "proxy": "v6",            # 加速源
     "release_proxy": "",      # Release 专用加速源
-    "depth": 1,               # 克隆深度
     "branch": "",             # 默认分支
     "dest": "",               # 默认下载目录
     "workspace": "",          # 工作区根目录 (gitx ws)
@@ -42,7 +41,6 @@ DEFAULTS: dict[str, object] = {
 _COMMENTS: dict[str, str] = {
     "proxy": "加速源: v6 / v4 / gh-proxy / off / 自定义 https://... (拉取走它, 推送直连 GitHub)",
     "release_proxy": "Release 专用加速源; 留空 = 跟随上面的 proxy (gitx proxy release 单独管理)",
-    "depth": "克隆深度: 1 = 浅克隆(快), 0 = 完整克隆(带全部历史)",
     "branch": "下载时未指定分支则用它; 留空 = 探测远端默认分支(main/master)",
     "dest": "默认下载目录 (支持 ~ ); 留空 = 当前目录",
     "workspace": "工作区根目录 (gitx ws 克隆与统一管理); 留空 = ~/gitx-workspaces",
@@ -193,6 +191,7 @@ def load() -> dict:
     if not path.exists():
         _migrate_legacy()
     raw = _read_toml(path)
+    raw.pop("depth", None)  # 旧版浅克隆默认值; 深度改用 --depth 显式指定
     data: dict = {**DEFAULTS}
     for key in DEFAULTS:
         if key in raw:
@@ -235,7 +234,7 @@ def _dump(data: dict) -> str:
     ]
     groups = [
         ("加速", ("proxy", "release_proxy")),
-        ("下载", ("depth", "branch", "dest", "resume")),
+        ("下载", ("branch", "dest", "resume")),
         ("工作区", ("workspace",)),
         ("同步", ("message", "sync_rebase")),
         ("API 与缓存", ("token", "cache", "cache_ttl")),

@@ -370,7 +370,7 @@ def clone(target: str, dest: str = "", *, depth: int | None = None, branch: str 
     cfg = config.load()
     prefix = config.active_proxy(proxy, no_proxy, cfg=cfg)
     if depth is None:
-        depth = int(cfg.get("depth", 1) or 1)
+        depth = 0
     try:
         download.run(info, path, prefix, depth, branch, submodules=submodules)
     except SystemExit:

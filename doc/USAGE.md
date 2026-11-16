@@ -16,7 +16,7 @@
 ### `gitx download` / `gitx clone`
 下载 GitHub 仓库、子目录或单个文件（默认走加速）。
 
-- `gitx https://github.com/owner/repo`：克隆完整仓库（浅克隆）
+- `gitx https://github.com/owner/repo`：克隆完整仓库（默认带全部历史）
 - `gitx owner/repo -x`：下载源码包 tar.gz（最快，无 Git 历史）
 - `gitx owner/repo -X`：下载源码包并直接解压
 - `gitx owner/repo/tree/main/src`：只下载 `src` 子目录（部分克隆 + 稀疏检出）
@@ -26,7 +26,7 @@
 **选项：**
 - `--no-proxy` / `--proxy <源>`：临时关闭加速或更换加速源
 - `--branch <分支>`：指定分支
-- `--depth <N>`：克隆深度（0 = 完整克隆）
+- `--depth <N>`：克隆深度（0 = 完整历史，默认；N = 只取最近 N 个提交）
 - `--submodules`：同时拉取子模组
 - `--fresh`：忽略断点续传，从头下载
 
